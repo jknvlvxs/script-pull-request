@@ -120,7 +120,7 @@ O `.env` já é ignorado pelo git (ver `.gitignore`). Conteúdo:
 
 ```dotenv
 GEMINI_API_KEY=sua_key_aqui
-GEMINI_MODEL=gemini-2.5-pro
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
 ### Alternativas
@@ -152,12 +152,13 @@ Execute a partir do diretório do repositório, **na branch** que deseja abrir o
 Acionado automaticamente quando o script roda **sem flags** em um terminal
 (ou forçado com `-i`). Todas as escolhas são navegáveis por teclado (via `gum`):
 
-1. **Tipo de PR** — `gum choose` (Normal → `release` / Hotfix → `main`/`master`).
+1. **Tipo de PR** — `gum choose` (Normal → `release` / Hotfix → `main`/`master` /
+   **Outra** → escolher a branch de destino via `gum filter`).
 2. **Draft?** — `gum confirm` (Sim/Não).
 3. **Branch de comparação** — `gum filter` com busca incremental sobre as branches
    remotas (Enter na opção "Usar base padrão" mantém o padrão).
-4. **Modelo Gemini** — `gum filter` com busca incremental; `gemini-2.5-pro`
-   pré-selecionado (Enter mantém o padrão).
+4. **Modelo Gemini** — `gum filter` com busca incremental sobre os modelos
+   disponíveis (Esc mantém o padrão `gemini-2.5-flash`).
 5. **Contexto adicional** — `gum confirm` + editor multilinha `gum write`.
 
 ### Modo não-interativo (flags)
@@ -188,6 +189,7 @@ Passar qualquer flag desativa o modo interativo (ideal para automação/CI):
 | Flag | Argumento | Descrição |
 |------|-----------|-----------|
 | `--hotfix` | — | PR direcionado para `main`/`master` em vez de `release`. |
+| `--base`, `--target` | branch | Define manualmente a branch de **destino** do PR (validada contra o remoto). |
 | `--draft` | — | Cria o PR como rascunho. |
 | `--diff [branch]` | branch (opcional) | Compara o diff com a branch informada; sem valor, usa `origin/HEAD`. |
 | `--model <nome>` | nome do modelo | Define o modelo Gemini (ex.: `gemini-2.5-flash`). |
@@ -206,7 +208,7 @@ Passar qualquer flag desativa o modo interativo (ideal para automação/CI):
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `GEMINI_API_KEY` | — | API key do Gemini (Google AI Studio). |
-| `GEMINI_MODEL` | `gemini-2.5-pro` | Modelo padrão (sobrescrito por `--model` ou pela seleção interativa). |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | Modelo padrão (sobrescrito por `--model` ou pela seleção interativa). |
 | `GENERATE_PR_ENV_FILE` | `<dir do script>/.env` | Caminho alternativo para o arquivo `.env`. |
 
 ---
@@ -217,8 +219,9 @@ Passar qualquer flag desativa o modo interativo (ideal para automação/CI):
 2. `git fetch origin` e determina a branch padrão (`main`/`master`).
 3. (Interativo) coleta tipo, draft, branch de comparação, modelo e contexto.
 4. Gera o `git diff` (ignorando lockfiles, builds, binários e imagens).
-5. Lê `.github/pull_request_template.md` e injeta o link do ClickUp (se a branch
-   tiver um ID no formato `feat/868gfh2k9`).
+5. Lê `.github/pull_request_template.md` (ou usa um **template padrão embutido** se o
+   arquivo não existir) e injeta o link do ClickUp (se a branch tiver um ID no formato
+   `feat/868gfh2k9`).
 6. **Cria o PR** (ou detecta um existente) já com o template — com `--assignee @me`.
 7. Gera a **descrição com IA** (API REST do Gemini, 3 tentativas; fallback para o
    `gemini` CLI se não houver key). Resultado é salvo em cache.
@@ -250,8 +253,13 @@ Instale a ferramenta indicada (ver [Instalação](#instalação)). O script só 
 **`Nenhuma API key encontrada`**
 Configure a key (ver [Configuração da API key](#configuração-da-api-key)).
 
-**`Template não encontrado em .github/pull_request_template.md`**
-O repositório precisa ter esse arquivo de template de PR.
+**`Template ... não encontrado — usando template padrão`**
+Apenas um aviso: o repositório não tem `.github/pull_request_template.md`, então o
+script usa um template padrão embutido. Adicione o arquivo se quiser um template próprio.
+
+**`A branch de destino 'origin/<branch>' não existe no remoto`**
+A branch alvo do PR (release/main ou a definida via `--base`/opção "Outra") não existe.
+O script lista as branches disponíveis. Verifique o nome ou rode `git fetch origin`.
 
 **Erro `NumericalClassifierStrategy` / "API returned invalid content"**
 Era um problema do roteador interno do `gemini` CLI. Configure a `GEMINI_API_KEY` para

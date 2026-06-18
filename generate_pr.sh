@@ -9,12 +9,13 @@ DIFF_BRANCH=""
 INTERACTIVE=false
 LIST_MODELS=false
 EXTRA_CONTEXT=""
+TARGET_OVERRIDE=""
 
 # Endpoint da Generative Language API (usada diretamente via curl quando há API key).
 API_BASE="https://generativelanguage.googleapis.com/v1beta"
 
 # Modelo padrão. Pode ser sobrescrito via env GEMINI_MODEL, flag --model ou seleção interativa.
-GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-pro}"
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
 
 # ─────────────────────────────────────────────────────────────
 # Dependências obrigatórias (falha cedo). Usa echo puro pois não
@@ -106,6 +107,44 @@ resolve_api_key() {
 }
 GEMINI_API_KEY_RESOLVED=$(resolve_api_key)
 
+# Lista as branches remotas (sem o HEAD), uma por linha.
+remote_branches() {
+  git branch -r --format='%(refname:short)' \
+    | sed 's@^origin/@@' | grep -vx 'HEAD' | sort -u
+}
+
+# Verifica se uma branch existe no remoto (após o fetch).
+remote_branch_exists() {
+  git show-ref --verify --quiet "refs/remotes/origin/$1"
+}
+
+# Template de PR padrão, usado quando não há .github/pull_request_template.md.
+# Mantém o placeholder do ClickUp e a seção de checklist (que a IA não preenche).
+DEFAULT_TEMPLATE='## 📋 Descrição
+
+<!-- Descreva o que este PR faz e por quê. -->
+
+## 🔗 Tarefa relacionada
+
+[Link para a tarefa no ClickUp]
+
+## 🔄 Tipo de mudança
+
+- [ ] 🐛 Correção de bug
+- [ ] ✨ Nova funcionalidade
+- [ ] ♻️ Refatoração
+- [ ] 📝 Documentação
+
+## 🧪 Como testar
+
+<!-- Passos para validar manualmente as mudanças. -->
+
+## 📌 Checklist de Qualidade
+
+- [ ] Código revisado
+- [ ] Testes executados
+- [ ] Documentação atualizada (se aplicável)'
+
 # Lista modelos da API que suportam generateContent (apenas família gemini).
 list_models() {
   local key="$1"
@@ -171,6 +210,14 @@ while [[ $# -gt 0 ]]; do
     --model)
       if [[ -n "$2" && "$2" != --* ]]; then
         GEMINI_MODEL="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    --base|--target)
+      if [[ -n "$2" && "$2" != --* ]]; then
+        TARGET_OVERRIDE="$2"
         shift 2
       else
         shift
@@ -249,10 +296,20 @@ if [ "$INTERACTIVE" = true ]; then
   _tipo=$(gum choose \
     "Normal — PR para release" \
     "Hotfix — PR para main/master" \
+    "Outra — escolher branch de destino" \
     --header "Tipo de PR" \
     --selected "Normal — PR para release" || true)
   case "$_tipo" in
     Hotfix*) HOTFIX=true ;;
+    Outra*)
+      _target=$(remote_branches \
+        | gum filter --placeholder "Escolha a branch de destino do PR..." --height 15 || true)
+      if [ -n "$_target" ]; then
+        TARGET_OVERRIDE="$_target"
+      else
+        ui_log warn "Nenhuma branch escolhida; usando Normal (release)."
+      fi
+      ;;
     "")      ui_log warn "Nenhum tipo escolhido; usando Normal." ;;
     *)       HOTFIX=false ;;
   esac
@@ -264,9 +321,7 @@ if [ "$INTERACTIVE" = true ]; then
 
   # 3) Branch de comparação (gum filter — busca incremental)
   _DEFAULT_OPT="» Usar base padrão ($MAIN_BRANCH)"
-  _branches=$( { printf '%s\n' "$_DEFAULT_OPT"; \
-    git branch -r --format='%(refname:short)' \
-      | sed 's@^origin/@@' | grep -vx 'HEAD' | sort -u; } )
+  _branches=$( { printf '%s\n' "$_DEFAULT_OPT"; remote_branches; } )
   _chosen=$(printf '%s\n' "$_branches" \
     | gum filter --placeholder "Filtrar branch de comparação (Enter = padrão)..." --height 15 || true)
   if [ -n "$_chosen" ] && [ "$_chosen" != "$_DEFAULT_OPT" ]; then
@@ -282,8 +337,8 @@ if [ "$INTERACTIVE" = true ]; then
       bash -c 'list_models "$0"' "$GEMINI_API_KEY_RESOLVED")
     if [ -n "$MODELS_RAW" ]; then
       _model=$(printf '%s\n' "$MODELS_RAW" \
-        | gum filter --placeholder "Digite para filtrar o modelo (Enter = $GEMINI_MODEL)..." \
-            --value "$GEMINI_MODEL" --height 15 || true)
+        | gum filter --placeholder "Digite para filtrar o modelo (Esc = manter $GEMINI_MODEL)..." \
+            --height 15 || true)
       [ -n "$_model" ] && GEMINI_MODEL="$_model"
     else
       ui_log warn "Não foi possível listar modelos; mantendo '$GEMINI_MODEL'."
@@ -309,12 +364,22 @@ else
   DIFF_BRANCH="$MAIN_BRANCH"
 fi
 
-if [ "$HOTFIX" = true ]; then
-  ui_log info "🚨 Modo HOTFIX — PR será criado para $MAIN_BRANCH"
+if [ -n "$TARGET_OVERRIDE" ]; then
+  TARGET_BRANCH="$TARGET_OVERRIDE"
+  ui_log info "🎯 PR será criado para $TARGET_BRANCH (definido manualmente)"
+elif [ "$HOTFIX" = true ]; then
   TARGET_BRANCH=$MAIN_BRANCH
+  ui_log info "🚨 Modo HOTFIX — PR será criado para $MAIN_BRANCH"
 else
   TARGET_BRANCH="release"
   ui_log info "🚀 Modo normal — PR será criado para $TARGET_BRANCH"
+fi
+
+# Garante que a branch de destino existe no remoto.
+if ! remote_branch_exists "$TARGET_BRANCH"; then
+  ui_log error "A branch de destino 'origin/$TARGET_BRANCH' não existe no remoto."
+  ui_log info "Branches disponíveis: $(remote_branches | paste -sd', ')"
+  exit 1
 fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -346,13 +411,13 @@ if [ -z "$GIT_DIFF" ]; then
   exit 0
 fi
 
-# Template
-if [ ! -f ".github/pull_request_template.md" ]; then
-  ui_log error "Template não encontrado em .github/pull_request_template.md"
-  exit 1
+# Template (usa o do repositório; se não existir, cai no template padrão embutido)
+if [ -f ".github/pull_request_template.md" ]; then
+  TEMPLATE_PR=$(cat .github/pull_request_template.md)
+else
+  ui_log warn "Template .github/pull_request_template.md não encontrado — usando template padrão."
+  TEMPLATE_PR="$DEFAULT_TEMPLATE"
 fi
-
-TEMPLATE_PR=$(cat .github/pull_request_template.md)
 
 # Extrai ID do ClickUp (ex: feat/868gfh2k9)
 CLICKUP_ID=$(echo "$CURRENT_BRANCH" | grep -oE '(feat|fix|chore|docs|style|refactor|perf|test|build|ci|hotfix|wip|impr|lint)/([0-9a-z]{9})' | cut -d'/' -f2 || true)
