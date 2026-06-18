@@ -152,6 +152,10 @@ Execute a partir do diretório do repositório, **na branch** que deseja abrir o
 Acionado automaticamente quando o script roda **sem flags** em um terminal
 (ou forçado com `-i`). Todas as escolhas são navegáveis por teclado (via `gum`):
 
+0. **PR já existente** — se houver um PR aberto da branch atual, o script indica e
+   pergunta via `gum choose` entre *editar o existente* (gerar nova descrição) ou
+   *criar um novo PR* (para outra branch de destino). Ao editar, os passos 1 e 2
+   (tipo/draft) são pulados, pois o destino já está fixado no PR.
 1. **Tipo de PR** — `gum choose` (Normal → `release` / Hotfix → `main`/`master` /
    **Outra** → escolher a branch de destino via `gum filter`).
 2. **Draft?** — `gum confirm` (Sim/Não).
@@ -181,6 +185,11 @@ Passar qualquer flag desativa o modo interativo (ideal para automação/CI):
 # Apenas listar modelos disponíveis
 ~/scripts/generate_pr.sh --list-models
 ```
+
+A checagem de PR existente filtra pela branch de **destino** (`--base`): se já houver
+um PR aberto para o mesmo destino, ele é reutilizado e a descrição é atualizada; se o
+destino for diferente (ex.: `--hotfix` para `main` enquanto há um PR para `release`),
+um novo PR é criado.
 
 ---
 

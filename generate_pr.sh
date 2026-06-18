@@ -288,11 +288,38 @@ else
   exit 1
 fi
 
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+# ─────────────────────────────────────────────────────────────
+# Detecta cedo se já existe um PR aberto desta branch (número + base).
+# Apenas consulta o GitHub (após o fetch) — não precisa de push aqui.
+# ─────────────────────────────────────────────────────────────
+EDIT_EXISTING=false
+EXISTING_PR_JSON=$(gh pr list --head "$CURRENT_BRANCH" --state open \
+  --json number,baseRefName --jq '.[0] // empty')
+EXISTING_PR_NUMBER=$(printf '%s' "$EXISTING_PR_JSON" | jq -r '.number // empty')
+EXISTING_PR_BASE=$(printf '%s' "$EXISTING_PR_JSON" | jq -r '.baseRefName // empty')
+if [ -n "$EXISTING_PR_NUMBER" ]; then
+  ui_log info "🔎 Já existe PR #$EXISTING_PR_NUMBER ($CURRENT_BRANCH → $EXISTING_PR_BASE)."
+fi
+
 # ─────────────────────────────────────────────────────────────
 # Modo interativo: escolhas navegáveis por teclado (gum)
 # ─────────────────────────────────────────────────────────────
 if [ "$INTERACTIVE" = true ]; then
-  # 1) Tipo de PR (gum choose — navegação por setas)
+  # 0) Se já existe PR: editar (nova descrição) ou criar um novo (outro destino)?
+  if [ -n "$EXISTING_PR_NUMBER" ]; then
+    _acao=$(gum choose \
+      "Editar o PR existente (#$EXISTING_PR_NUMBER → $EXISTING_PR_BASE) — gerar nova descrição" \
+      "Criar um novo PR (outra branch de destino)" \
+      --header "PR já existe para esta branch" || true)
+    case "$_acao" in
+      Editar*) EDIT_EXISTING=true ;;
+    esac
+  fi
+
+  # 1) Tipo de PR (gum choose — navegação por setas) — pulado ao editar PR existente
+  if [ "$EDIT_EXISTING" != true ]; then
   _tipo=$(gum choose \
     "Normal — PR para release" \
     "Hotfix — PR para main/master" \
@@ -318,6 +345,7 @@ if [ "$INTERACTIVE" = true ]; then
   if gum confirm "Criar como rascunho (draft)?" --default=false; then
     DRAFT=true
   fi
+  fi  # fim do bloco "não está editando PR existente"
 
   # 3) Branch de comparação (gum filter — busca incremental)
   _DEFAULT_OPT="» Usar base padrão ($MAIN_BRANCH)"
@@ -364,7 +392,10 @@ else
   DIFF_BRANCH="$MAIN_BRANCH"
 fi
 
-if [ -n "$TARGET_OVERRIDE" ]; then
+if [ "$EDIT_EXISTING" = true ]; then
+  TARGET_BRANCH="$EXISTING_PR_BASE"
+  ui_log info "✏️ Editando PR existente #$EXISTING_PR_NUMBER (destino $TARGET_BRANCH)"
+elif [ -n "$TARGET_OVERRIDE" ]; then
   TARGET_BRANCH="$TARGET_OVERRIDE"
   ui_log info "🎯 PR será criado para $TARGET_BRANCH (definido manualmente)"
 elif [ "$HOTFIX" = true ]; then
@@ -375,6 +406,15 @@ else
   ui_log info "🚀 Modo normal — PR será criado para $TARGET_BRANCH"
 fi
 
+# Ao criar um novo PR, bloqueia se o destino colidir com um PR já existente
+# (o GitHub só permite um PR aberto por par origem→destino).
+if [ "$EDIT_EXISTING" != true ] && [ -n "$EXISTING_PR_NUMBER" ] \
+   && [ "$EXISTING_PR_BASE" = "$TARGET_BRANCH" ]; then
+  ui_log error "Já existe PR #$EXISTING_PR_NUMBER de $CURRENT_BRANCH → $TARGET_BRANCH."
+  ui_log info "Escolha outro destino para o novo PR ou edite o existente."
+  exit 1
+fi
+
 # Garante que a branch de destino existe no remoto.
 if ! remote_branch_exists "$TARGET_BRANCH"; then
   ui_log error "A branch de destino 'origin/$TARGET_BRANCH' não existe no remoto."
@@ -382,7 +422,6 @@ if ! remote_branch_exists "$TARGET_BRANCH"; then
   exit 1
 fi
 
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ui_log info "🌿 Branch atual: $CURRENT_BRANCH"
 
 ui_log info "🔍 Gerando diff para $DIFF_BRANCH..."
@@ -441,7 +480,7 @@ ui_spin "Garantindo que a branch está no remoto..." \
 ui_log info "🔎 Verificando se já existe PR..."
 
 PR_TITLE="${CURRENT_BRANCH^}"
-PR_NUMBER=$(gh pr list --head "$CURRENT_BRANCH" --json number --jq '.[0].number')
+PR_NUMBER=$(gh pr list --head "$CURRENT_BRANCH" --base "$TARGET_BRANCH" --state open --json number --jq '.[0].number')
 
 if [ -n "$PR_NUMBER" ]; then
   ui_log info "✅ PR já existe (#$PR_NUMBER)."
@@ -466,7 +505,7 @@ else
   gh pr create "${CREATE_ARGS[@]}"
   rm -f "$TEMPLATE_FILE"
 
-  PR_NUMBER=$(gh pr list --head "$CURRENT_BRANCH" --json number --jq '.[0].number')
+  PR_NUMBER=$(gh pr list --head "$CURRENT_BRANCH" --base "$TARGET_BRANCH" --state open --json number --jq '.[0].number')
 fi
 
 # ─────────────────────────────────────────────────────────────
