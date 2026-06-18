@@ -13,8 +13,56 @@ EXTRA_CONTEXT=""
 # Endpoint da Generative Language API (usada diretamente via curl quando há API key).
 API_BASE="https://generativelanguage.googleapis.com/v1beta"
 
-# Modelo padrão. Pode ser sobrescrito via env GEMINI_MODEL, flag --model ou menu interativo.
+# Modelo padrão. Pode ser sobrescrito via env GEMINI_MODEL, flag --model ou seleção interativa.
 GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-pro}"
+
+# ─────────────────────────────────────────────────────────────
+# Dependências obrigatórias (falha cedo). Usa echo puro pois não
+# podemos depender do gum para reportar a ausência do gum.
+# O gemini CLI é opcional (fallback apenas quando não há API key).
+# ─────────────────────────────────────────────────────────────
+_missing_dep=
+for _dep in gum gh jq curl git; do
+  command -v "$_dep" >/dev/null 2>&1 || { echo "❌ Dependência ausente: $_dep"; _missing_dep=1; }
+done
+if [ -n "$_missing_dep" ]; then
+  echo "ℹ️  Instale as dependências acima e tente novamente (veja o README.md)."
+  exit 1
+fi
+
+# ─────────────────────────────────────────────────────────────
+# Camada de UI (gum)
+# ─────────────────────────────────────────────────────────────
+
+# Cabeçalho/banner.
+ui_header() {
+  gum style --border rounded --margin "1 0" --padding "0 2" \
+    --border-foreground 212 --foreground 212 --bold "$1"
+}
+
+# Log consistente. Uso: ui_log <info|warn|error|debug> "mensagem"
+ui_log() {
+  local level="$1"; shift
+  gum log --level "$level" -- "$*"
+}
+
+# Caixa de sucesso destacada.
+ui_success() {
+  gum style --border rounded --padding "0 2" --margin "1 0" \
+    --border-foreground 42 --foreground 42 --bold "$1"
+}
+
+# Spinner para comandos demorados (sem capturar saída). Propaga o exit code.
+ui_spin() {
+  local title="$1"; shift
+  gum spin --spinner dot --title "$title" -- "$@"
+}
+
+# Spinner que captura a saída padrão do comando (para fetch de dados).
+ui_spin_capture() {
+  local title="$1"; shift
+  gum spin --spinner dot --title "$title" --show-output -- "$@"
+}
 
 # Carrega variáveis de um arquivo .env (KEY=VALUE por linha), sem sobrescrever
 # o que já existe no ambiente (env real tem precedência sobre o .env).
@@ -82,7 +130,7 @@ generate_via_rest() {
     "$API_BASE/models/$model:generateContent")
 
   if printf '%s' "$resp" | jq -e '.error' >/dev/null 2>&1; then
-    echo "   ⚠️ API: $(printf '%s' "$resp" | jq -r '.error.message // "erro desconhecido"')" >&2
+    ui_log error "API: $(printf '%s' "$resp" | jq -r '.error.message // "erro desconhecido"')"
     return 1
   fi
 
@@ -141,7 +189,7 @@ while [[ $# -gt 0 ]]; do
         EXTRA_CONTEXT="${EXTRA_CONTEXT}${EXTRA_CONTEXT:+$'\n'}$(cat "$2")"
         shift 2
       else
-        echo "⚠️ Arquivo de contexto não encontrado: $2" >&2
+        ui_log warn "Arquivo de contexto não encontrado: $2"
         [[ -n "$2" ]] && shift 2 || shift
       fi
       ;;
@@ -168,7 +216,7 @@ done
 # ─────────────────────────────────────────────────────────────
 if [ "$LIST_MODELS" = true ]; then
   if [ -z "$GEMINI_API_KEY_RESOLVED" ]; then
-    echo "❌ Nenhuma API key encontrada (defina GEMINI_API_KEY ou crie $API_KEY_FILE)."
+    ui_log error "Nenhuma API key encontrada (defina GEMINI_API_KEY ou crie $API_KEY_FILE)."
     exit 1
   fi
   echo "📋 Modelos disponíveis (suportam generateContent):"
@@ -177,75 +225,82 @@ if [ "$LIST_MODELS" = true ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────
-# Modo interativo: pergunta as opções ao invés de exigir flags
+# Atualiza o repositório (necessário em ambos os modos) — antes de
+# perguntar para que a lista de branches/modelos esteja disponível.
 # ─────────────────────────────────────────────────────────────
-if [ "$INTERACTIVE" = true ]; then
-  echo "🧭 Modo interativo (dica: use flags para pular as perguntas)"
+ui_header "Gerador de Pull Request"
 
-  PS3=$'\n👉 Escolha o tipo de PR: '
-  select _opt in "Normal (PR para release)" "Hotfix (PR para main/master)"; do
-    case "$REPLY" in
-      1) HOTFIX=false; break ;;
-      2) HOTFIX=true; break ;;
-      *) echo "❌ Opção inválida, tente novamente." ;;
-    esac
-  done
-
-  read -rp $'\n📝 Criar como rascunho (draft)? [s/N]: ' _ans
-  [[ "$_ans" =~ ^[Ss]$ ]] && DRAFT=true
-
-  read -rp $'\n🔀 Comparar o diff com uma branch específica? (enter = base padrão): ' _ans
-  if [ -n "$_ans" ]; then
-    DIFF=true
-    DIFF_BRANCH="$_ans"
-  fi
-
-  # Seleção dinâmica de modelo (apenas se houver API key)
-  if [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
-    echo $'\n🔢 Buscando modelos disponíveis...'
-    mapfile -t MODELS < <(list_models "$GEMINI_API_KEY_RESOLVED")
-    if [ ${#MODELS[@]} -gt 0 ]; then
-      PS3=$'\n👉 Escolha o modelo: '
-      select _m in "Manter padrão ($GEMINI_MODEL)" "${MODELS[@]}" "Outro (digitar)"; do
-        if [ -z "$_m" ]; then
-          echo "❌ Opção inválida, tente novamente."
-          continue
-        fi
-        case "$_m" in
-          "Manter padrão "*) break ;;
-          "Outro (digitar)") read -rp "Nome do modelo: " GEMINI_MODEL; break ;;
-          *) GEMINI_MODEL="$_m"; break ;;
-        esac
-      done
-    else
-      echo "⚠️ Não foi possível listar modelos; mantendo '$GEMINI_MODEL'."
-    fi
-  fi
-
-  # Contexto adicional (multilinha)
-  read -rp $'\n💬 Adicionar contexto extra ao prompt? [s/N]: ' _ans
-  if [[ "$_ans" =~ ^[Ss]$ ]]; then
-    echo "   Digite o contexto e encerre com Ctrl-D em uma linha vazia:"
-    EXTRA_CONTEXT=$(cat)
-  fi
-
-  echo ""
-fi
-
-echo "🔄 Buscando atualizações do repositório..."
-git fetch origin
-
-echo "🔎 Determinando a branch padrão..."
+ui_spin "Buscando atualizações do repositório..." git fetch origin
 
 if git show-ref --verify --quiet refs/remotes/origin/main; then
   MAIN_BRANCH="main"
 elif git show-ref --verify --quiet refs/remotes/origin/master; then
   MAIN_BRANCH="master"
 else
-  echo "❌ ERRO: Não foi possível encontrar 'origin/main' ou 'origin/master'."
+  ui_log error "Não foi possível encontrar 'origin/main' ou 'origin/master'."
   exit 1
 fi
 
+# ─────────────────────────────────────────────────────────────
+# Modo interativo: escolhas navegáveis por teclado (gum)
+# ─────────────────────────────────────────────────────────────
+if [ "$INTERACTIVE" = true ]; then
+  # 1) Tipo de PR (gum choose — navegação por setas)
+  _tipo=$(gum choose \
+    "Normal — PR para release" \
+    "Hotfix — PR para main/master" \
+    --header "Tipo de PR" \
+    --selected "Normal — PR para release" || true)
+  case "$_tipo" in
+    Hotfix*) HOTFIX=true ;;
+    "")      ui_log warn "Nenhum tipo escolhido; usando Normal." ;;
+    *)       HOTFIX=false ;;
+  esac
+
+  # 2) Draft? (gum confirm — Sim/Não)
+  if gum confirm "Criar como rascunho (draft)?" --default=false; then
+    DRAFT=true
+  fi
+
+  # 3) Branch de comparação (gum filter — busca incremental)
+  _DEFAULT_OPT="» Usar base padrão ($MAIN_BRANCH)"
+  _branches=$( { printf '%s\n' "$_DEFAULT_OPT"; \
+    git branch -r --format='%(refname:short)' \
+      | sed 's@^origin/@@' | grep -vx 'HEAD' | sort -u; } )
+  _chosen=$(printf '%s\n' "$_branches" \
+    | gum filter --placeholder "Filtrar branch de comparação (Enter = padrão)..." --height 15 || true)
+  if [ -n "$_chosen" ] && [ "$_chosen" != "$_DEFAULT_OPT" ]; then
+    DIFF=true
+    DIFF_BRANCH="$_chosen"
+  fi
+
+  # 4) Modelo Gemini (gum filter — busca incremental, padrão pré-selecionado)
+  if [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
+    export API_BASE
+    export -f list_models
+    MODELS_RAW=$(ui_spin_capture "Buscando modelos Gemini disponíveis..." \
+      bash -c 'list_models "$0"' "$GEMINI_API_KEY_RESOLVED")
+    if [ -n "$MODELS_RAW" ]; then
+      _model=$(printf '%s\n' "$MODELS_RAW" \
+        | gum filter --placeholder "Digite para filtrar o modelo (Enter = $GEMINI_MODEL)..." \
+            --value "$GEMINI_MODEL" --height 15 || true)
+      [ -n "$_model" ] && GEMINI_MODEL="$_model"
+    else
+      ui_log warn "Não foi possível listar modelos; mantendo '$GEMINI_MODEL'."
+    fi
+  fi
+
+  # 5) Contexto adicional (gum confirm + gum write multilinha)
+  if gum confirm "Adicionar contexto extra ao prompt?" --default=false; then
+    EXTRA_CONTEXT=$(gum write \
+      --placeholder "Descreva o contexto (Ctrl+D para enviar, Esc para cancelar)..." \
+      --width 90 --height 8 || true)
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────
+# Resolve branch de comparação e branch alvo
+# ─────────────────────────────────────────────────────────────
 if [ "$DIFF" = true ]; then
   if [ -z "$DIFF_BRANCH" ]; then
     DIFF_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
@@ -255,17 +310,17 @@ else
 fi
 
 if [ "$HOTFIX" = true ]; then
-  echo "🚨 Modo HOTFIX ativado — PR será criado para $MAIN_BRANCH"
+  ui_log info "🚨 Modo HOTFIX — PR será criado para $MAIN_BRANCH"
   TARGET_BRANCH=$MAIN_BRANCH
 else
   TARGET_BRANCH="release"
-  echo "🚀 Modo normal — PR será criado para $TARGET_BRANCH"
+  ui_log info "🚀 Modo normal — PR será criado para $TARGET_BRANCH"
 fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-echo "🌿 Branch atual: $CURRENT_BRANCH"
+ui_log info "🌿 Branch atual: $CURRENT_BRANCH"
 
-echo "🔍 Gerando diff para $DIFF_BRANCH..."
+ui_log info "🔍 Gerando diff para $DIFF_BRANCH..."
 
 GIT_DIFF=$(git diff "origin/$DIFF_BRANCH...HEAD" -- . \
   ':(exclude)*package-lock.json' \
@@ -287,13 +342,13 @@ GIT_DIFF=$(git diff "origin/$DIFF_BRANCH...HEAD" -- . \
   ':(exclude)*.db')
 
 if [ -z "$GIT_DIFF" ]; then
-  echo "⚠️ Nenhum diff relevante encontrado."
+  ui_log warn "Nenhum diff relevante encontrado."
   exit 0
 fi
 
 # Template
 if [ ! -f ".github/pull_request_template.md" ]; then
-  echo "❌ Template não encontrado em .github/pull_request_template.md"
+  ui_log error "Template não encontrado em .github/pull_request_template.md"
   exit 1
 fi
 
@@ -304,29 +359,29 @@ CLICKUP_ID=$(echo "$CURRENT_BRANCH" | grep -oE '(feat|fix|chore|docs|style|refac
 
 if [ -n "$CLICKUP_ID" ]; then
   CLICKUP_LINK="[Link para a tarefa no ClickUp #$CLICKUP_ID](https://app.clickup.com/t/$CLICKUP_ID)"
-  echo "🔗 ClickUp detectado: $CLICKUP_LINK"
+  ui_log info "🔗 ClickUp detectado: #$CLICKUP_ID"
 
   TEMPLATE_PR=$(echo "$TEMPLATE_PR" | sed "s|\[Link para a tarefa no ClickUp\]|$CLICKUP_LINK|g")
 else
-  echo "⚠️ Nenhum ID de ClickUp detectado na branch"
+  ui_log warn "Nenhum ID de ClickUp detectado na branch"
 fi
 
 # ─────────────────────────────────────────────────────────────
 # 1º) Cria/garante o PR ANTES de gerar a descrição com IA.
 #     O corpo inicial é o próprio template; a IA só atualiza depois.
 # ─────────────────────────────────────────────────────────────
-echo "⬆️ Garantindo que a branch está no remoto..."
-git push -u --no-verify origin "$CURRENT_BRANCH" > /dev/null 2>&1
+ui_spin "Garantindo que a branch está no remoto..." \
+  git push -u --no-verify origin "$CURRENT_BRANCH"
 
-echo "🔎 Verificando se já existe PR..."
+ui_log info "🔎 Verificando se já existe PR..."
 
 PR_TITLE="${CURRENT_BRANCH^}"
 PR_NUMBER=$(gh pr list --head "$CURRENT_BRANCH" --json number --jq '.[0].number')
 
 if [ -n "$PR_NUMBER" ]; then
-  echo "✅ PR já existe (#$PR_NUMBER)."
+  ui_log info "✅ PR já existe (#$PR_NUMBER)."
 else
-  echo "🆕 Criando novo PR com o template (a descrição será preenchida em seguida)..."
+  ui_log info "🆕 Criando novo PR com o template (a descrição será preenchida em seguida)..."
 
   TEMPLATE_FILE=$(mktemp)
   printf '%s' "$TEMPLATE_PR" > "$TEMPLATE_FILE"
@@ -373,7 +428,7 @@ generate_pr_body() {
         return 0
       fi
     fi
-    echo "⚠️ Tentativa $attempt/$max_attempts de gerar a descrição falhou..." >&2
+    ui_log warn "Tentativa $attempt/$max_attempts de gerar a descrição falhou..."
     attempt=$((attempt + 1))
     [ "$attempt" -le "$max_attempts" ] && sleep 2
   done
@@ -399,13 +454,13 @@ CACHE_FILE="$CACHE_DIR/$CACHE_KEY"
 PR_BODY=""
 
 if [ -f "$CACHE_FILE" ]; then
-  echo "💾 Usando conteúdo do PR em cache (diff/contexto/modelo não mudaram)..."
+  ui_log info "💾 Usando conteúdo do PR em cache (diff/contexto/modelo não mudaram)..."
   PR_BODY=$(cat "$CACHE_FILE")
 else
   if [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
-    echo "🧠 Gerando conteúdo do PR via API REST (modelo: $GEMINI_MODEL)..."
+    ui_log info "🧠 Gerando conteúdo do PR via API REST (modelo: $GEMINI_MODEL)..."
   else
-    echo "🧠 Gerando conteúdo do PR via gemini CLI (modelo: $GEMINI_MODEL)..."
+    ui_log info "🧠 Gerando conteúdo do PR via gemini CLI (modelo: $GEMINI_MODEL)..."
   fi
 
   PROMPT=$(cat <<EOF
@@ -436,8 +491,8 @@ EOF
   if PR_BODY=$(generate_pr_body "$PROMPT"); then
     printf '%s' "$PR_BODY" > "$CACHE_FILE"
   else
-    echo "❌ Não foi possível gerar a descrição com a IA após várias tentativas."
-    echo "ℹ️ O PR #$PR_NUMBER já foi criado com o template. Você pode rodar o script novamente mais tarde para preencher a descrição."
+    ui_log error "Não foi possível gerar a descrição com a IA após várias tentativas."
+    ui_log info "O PR #$PR_NUMBER já foi criado com o template. Rode o script novamente mais tarde para preencher a descrição."
     PR_BODY=""
   fi
 fi
@@ -446,7 +501,7 @@ fi
 # 3º) Atualiza o corpo do PR com a descrição gerada (se houver)
 # ─────────────────────────────────────────────────────────────
 if [ -n "$PR_BODY" ]; then
-  echo "✏️ Atualizando a descrição do PR #$PR_NUMBER..."
+  ui_log info "✏️ Atualizando a descrição do PR #$PR_NUMBER..."
 
   TEMP_BODY_FILE=$(mktemp)
   printf '%s' "$PR_BODY" > "$TEMP_BODY_FILE"
@@ -464,4 +519,4 @@ fi
 # Garante o assignee (caso o PR já existisse)
 gh pr edit "$PR_NUMBER" --add-assignee @me > /dev/null 2>&1 || true
 
-echo "✅ Processo finalizado!"
+ui_success "PR #$PR_NUMBER pronto!"
