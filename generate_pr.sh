@@ -65,6 +65,24 @@ ui_spin_capture() {
   gum spin --spinner dot --title "$title" --show-output -- "$@"
 }
 
+# Encerra o script quando o usuário cancela um prompt do gum (Ctrl+C / Esc).
+# Deve ser chamado fora de uma substituição $(...) para que o exit atinja o script.
+_abort_cancel() {
+  ui_log warn "Operação cancelada pelo usuário."
+  exit 130
+}
+
+# gum confirm com 3 estados: 0 = sim, 1 = não, abort (Ctrl+C/Esc) = encerra o script.
+ui_confirm() {
+  local rc=0
+  gum confirm "$@" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) _abort_cancel ;;
+  esac
+}
+
 # Carrega variáveis de um arquivo .env (KEY=VALUE por linha), sem sobrescrever
 # o que já existe no ambiente (env real tem precedência sobre o .env).
 load_env_file() {
@@ -124,10 +142,6 @@ DEFAULT_TEMPLATE='## 📋 Descrição
 
 <!-- Descreva o que este PR faz e por quê. -->
 
-## 🔗 Tarefa relacionada
-
-[Link para a tarefa no ClickUp]
-
 ## 🔄 Tipo de mudança
 
 - [ ] 🐛 Correção de bug
@@ -137,13 +151,7 @@ DEFAULT_TEMPLATE='## 📋 Descrição
 
 ## 🧪 Como testar
 
-<!-- Passos para validar manualmente as mudanças. -->
-
-## 📌 Checklist de Qualidade
-
-- [ ] Código revisado
-- [ ] Testes executados
-- [ ] Documentação atualizada (se aplicável)'
+<!-- Passos para validar manualmente as mudanças. -->'
 
 # Lista modelos da API que suportam generateContent (apenas família gemini).
 list_models() {
@@ -309,10 +317,12 @@ fi
 if [ "$INTERACTIVE" = true ]; then
   # 0) Se já existe PR: editar (nova descrição) ou criar um novo (outro destino)?
   if [ -n "$EXISTING_PR_NUMBER" ]; then
-    _acao=$(gum choose \
+    if ! _acao=$(gum choose \
       "Editar o PR existente (#$EXISTING_PR_NUMBER → $EXISTING_PR_BASE) — gerar nova descrição" \
       "Criar um novo PR (outra branch de destino)" \
-      --header "PR já existe para esta branch" || true)
+      --header "PR já existe para esta branch"); then
+      _abort_cancel
+    fi
     case "$_acao" in
       Editar*) EDIT_EXISTING=true ;;
     esac
@@ -320,29 +330,28 @@ if [ "$INTERACTIVE" = true ]; then
 
   # 1) Tipo de PR (gum choose — navegação por setas) — pulado ao editar PR existente
   if [ "$EDIT_EXISTING" != true ]; then
-  _tipo=$(gum choose \
+  if ! _tipo=$(gum choose \
     "Normal — PR para release" \
     "Hotfix — PR para main/master" \
     "Outra — escolher branch de destino" \
     --header "Tipo de PR" \
-    --selected "Normal — PR para release" || true)
+    --selected "Normal — PR para release"); then
+    _abort_cancel
+  fi
   case "$_tipo" in
     Hotfix*) HOTFIX=true ;;
     Outra*)
-      _target=$(remote_branches \
-        | gum filter --placeholder "Escolha a branch de destino do PR..." --height 15 || true)
-      if [ -n "$_target" ]; then
-        TARGET_OVERRIDE="$_target"
-      else
-        ui_log warn "Nenhuma branch escolhida; usando Normal (release)."
+      if ! _target=$(remote_branches \
+        | gum filter --placeholder "Escolha a branch de destino do PR..." --height 15); then
+        _abort_cancel
       fi
+      TARGET_OVERRIDE="$_target"
       ;;
-    "")      ui_log warn "Nenhum tipo escolhido; usando Normal." ;;
     *)       HOTFIX=false ;;
   esac
 
   # 2) Draft? (gum confirm — Sim/Não)
-  if gum confirm "Criar como rascunho (draft)?" --default=false; then
+  if ui_confirm "Criar como rascunho (draft)?" --default=false; then
     DRAFT=true
   fi
   fi  # fim do bloco "não está editando PR existente"
@@ -350,9 +359,11 @@ if [ "$INTERACTIVE" = true ]; then
   # 3) Branch de comparação (gum filter — busca incremental)
   _DEFAULT_OPT="» Usar base padrão ($MAIN_BRANCH)"
   _branches=$( { printf '%s\n' "$_DEFAULT_OPT"; remote_branches; } )
-  _chosen=$(printf '%s\n' "$_branches" \
-    | gum filter --placeholder "Filtrar branch de comparação (Enter = padrão)..." --height 15 || true)
-  if [ -n "$_chosen" ] && [ "$_chosen" != "$_DEFAULT_OPT" ]; then
+  if ! _chosen=$(printf '%s\n' "$_branches" \
+    | gum filter --placeholder "Filtrar branch de comparação..." --height 15); then
+    _abort_cancel
+  fi
+  if [ "$_chosen" != "$_DEFAULT_OPT" ]; then
     DIFF=true
     DIFF_BRANCH="$_chosen"
   fi
@@ -364,20 +375,27 @@ if [ "$INTERACTIVE" = true ]; then
     MODELS_RAW=$(ui_spin_capture "Buscando modelos Gemini disponíveis..." \
       bash -c 'list_models "$0"' "$GEMINI_API_KEY_RESOLVED")
     if [ -n "$MODELS_RAW" ]; then
-      _model=$(printf '%s\n' "$MODELS_RAW" \
-        | gum filter --placeholder "Digite para filtrar o modelo (Esc = manter $GEMINI_MODEL)..." \
-            --height 15 || true)
-      [ -n "$_model" ] && GEMINI_MODEL="$_model"
+      _KEEP_OPT="» Manter modelo atual ($GEMINI_MODEL)"
+      _models_list=$( { printf '%s\n' "$_KEEP_OPT"; printf '%s\n' "$MODELS_RAW"; } )
+      if ! _model=$(printf '%s\n' "$_models_list" \
+        | gum filter --placeholder "Filtrar o modelo Gemini..." --height 15); then
+        _abort_cancel
+      fi
+      if [ "$_model" != "$_KEEP_OPT" ] && [ -n "$_model" ]; then
+        GEMINI_MODEL="$_model"
+      fi
     else
       ui_log warn "Não foi possível listar modelos; mantendo '$GEMINI_MODEL'."
     fi
   fi
 
   # 5) Contexto adicional (gum confirm + gum write multilinha)
-  if gum confirm "Adicionar contexto extra ao prompt?" --default=false; then
-    EXTRA_CONTEXT=$(gum write \
-      --placeholder "Descreva o contexto (Ctrl+D para enviar, Esc para cancelar)..." \
-      --width 90 --height 8 || true)
+  if ui_confirm "Adicionar contexto extra ao prompt?" --default=false; then
+    if ! EXTRA_CONTEXT=$(gum write \
+      --placeholder "Descreva o contexto (Ctrl+D para enviar)..." \
+      --width 90 --height 8); then
+      _abort_cancel
+    fi
   fi
 fi
 
