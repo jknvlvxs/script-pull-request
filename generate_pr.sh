@@ -14,9 +14,6 @@ TARGET_OVERRIDE=""
 # Endpoint da Generative Language API (usada diretamente via curl quando há API key).
 API_BASE="https://generativelanguage.googleapis.com/v1beta"
 
-# Modelo padrão. Pode ser sobrescrito via env GEMINI_MODEL, flag --model ou seleção interativa.
-GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.5-flash}"
-
 # ─────────────────────────────────────────────────────────────
 # Dependências obrigatórias (falha cedo). Usa echo puro pois não
 # podemos depender do gum para reportar a ausência do gum.
@@ -110,6 +107,11 @@ load_env_file() {
 # via GENERATE_PR_ENV_FILE.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 load_env_file "${GENERATE_PR_ENV_FILE:-$SCRIPT_DIR/.env}"
+
+# Modelo padrão — definido só DEPOIS de carregar o .env, senão o default do código
+# ocupa a variável e o GEMINI_MODEL do .env é ignorado.
+# Precedência: flag --model / seleção interativa > env real > .env > default abaixo.
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.5-flash}"
 
 # Resolução da API key (NUNCA hardcode aqui — este arquivo é versionado):
 #   1. env GEMINI_API_KEY (inclui valores vindos do .env)

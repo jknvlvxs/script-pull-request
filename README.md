@@ -122,7 +122,7 @@ O `.env` já é ignorado pelo git (ver `.gitignore`). Conteúdo:
 
 ```dotenv
 GEMINI_API_KEY=sua_key_aqui
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.7-flash
 ```
 
 ### Alternativas
@@ -164,7 +164,7 @@ Acionado automaticamente quando o script roda **sem flags** em um terminal
 3. **Branch de comparação** — `gum filter` com busca incremental sobre as branches
    remotas (Enter na opção "Usar base padrão" mantém o padrão).
 4. **Modelo Gemini** — `gum filter` com busca incremental sobre os modelos
-   disponíveis (Esc mantém o padrão `gemini-2.5-flash`).
+   disponíveis (a primeira opção mantém o `GEMINI_MODEL` configurado).
 5. **Contexto adicional** — `gum confirm` + editor multilinha `gum write`.
 
 ### Modo não-interativo (flags)
@@ -219,7 +219,7 @@ um novo PR é criado.
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `GEMINI_API_KEY` | — | API key do Gemini (Google AI Studio). |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Modelo padrão (sobrescrito por `--model` ou pela seleção interativa). |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Modelo padrão. Precedência: `--model`/seleção interativa > variável de ambiente > `.env` > default do código. |
 | `GENERATE_PR_ENV_FILE` | `<dir do script>/.env` | Caminho alternativo para o arquivo `.env`. |
 
 ---

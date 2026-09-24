@@ -10,6 +10,12 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ## [Não lançado]
 
+### Corrigido
+
+- O `GEMINI_MODEL` definido no `.env` era ignorado: o default do código era atribuído
+  antes de carregar o `.env`, e o loader não sobrescreve variáveis já definidas. O
+  default agora é aplicado depois do `.env`.
+
 ## 2026-09-24
 
 ### Alterado
