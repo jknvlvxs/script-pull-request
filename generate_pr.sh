@@ -4,6 +4,7 @@ set -e
 
 HOTFIX=false
 DRAFT=false
+EDIT_FLAG=false
 DIFF=false
 DIFF_BRANCH=""
 INTERACTIVE=false
@@ -482,6 +483,10 @@ while [[ $# -gt 0 ]]; do
       DRAFT=true
       shift
       ;;
+    --edit)
+      EDIT_FLAG=true
+      shift
+      ;;
     --diff)
       DIFF=true
       # captura o branch se o próximo arg não for outra flag
@@ -623,12 +628,23 @@ if [ -n "$EXISTING_PR_NUMBER" ]; then
   ui_log info "🔎 Já existe PR #$EXISTING_PR_NUMBER ($CURRENT_BRANCH → $EXISTING_PR_BASE)."
 fi
 
+# --edit: atualiza a descrição do PR aberto desta branch, qualquer que seja o destino
+# (ignora --hotfix/--base).
+if [ "$EDIT_FLAG" = true ]; then
+  if [ -z "$EXISTING_PR_NUMBER" ]; then
+    ui_log error "--edit: não há PR aberto da branch $CURRENT_BRANCH para editar."
+    exit 1
+  fi
+  EDIT_EXISTING=true
+fi
+
 # ─────────────────────────────────────────────────────────────
 # Modo interativo: escolhas navegáveis por teclado (gum)
 # ─────────────────────────────────────────────────────────────
 if [ "$INTERACTIVE" = true ]; then
   # 0) Se já existe PR: editar (nova descrição) ou criar um novo (outro destino)?
-  if [ -n "$EXISTING_PR_NUMBER" ]; then
+  #    Pulado quando --edit já decidiu.
+  if [ -n "$EXISTING_PR_NUMBER" ] && [ "$EDIT_EXISTING" != true ]; then
     if ! _acao=$(gum choose \
       "Editar o PR existente (#$EXISTING_PR_NUMBER → $EXISTING_PR_BASE) — gerar nova descrição" \
       "Criar um novo PR (outra branch de destino)" \

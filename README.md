@@ -207,6 +207,9 @@ Passar qualquer flag desativa o modo interativo (ideal para automação/CI):
 # Gerar a descrição com o Claude Opus
 ~/scripts/generate_pr.sh --no-interactive --model opus
 
+# Regenerar a descrição do PR já aberto desta branch
+~/scripts/generate_pr.sh --edit --model sonnet
+
 # Hotfix em draft
 ~/scripts/generate_pr.sh --hotfix --draft
 
@@ -234,6 +237,7 @@ um novo PR é criado.
 | `--hotfix` | — | PR direcionado para `main`/`master` em vez de `release`. |
 | `--base`, `--target` | branch | Define manualmente a branch de **destino** do PR (validada contra o remoto). |
 | `--draft` | — | Cria o PR como rascunho. |
+| `--edit` | — | Atualiza só a descrição do PR aberto da branch, qualquer que seja o destino dele (ignora `--hotfix`/`--base`). Erro se não houver PR aberto. |
 | `--diff [branch]` | branch (opcional) | Compara o diff com a branch informada; sem valor, usa `origin/HEAD`. |
 | `--model <nome>` | nome do modelo | Define o modelo. `gemini-*` usa o Gemini; `sonnet`, `opus`, `haiku` ou `claude-*` usam o Claude; outros nomes valem para o provedor atual. |
 | `--provider <nome>` | `gemini` ou `claude` | Define o provedor de IA (normalmente desnecessário: `--model` já o deduz). |

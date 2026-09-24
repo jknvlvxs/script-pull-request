@@ -21,6 +21,8 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   `--model` deduz o provedor pelo nome (`gemini-*` → Gemini; `sonnet`/`opus`/`haiku`/
   `claude-*` → Claude).
 - `--list-models` também mostra os apelidos do Claude.
+- Flag `--edit`: atualiza só a descrição do PR aberto da branch, usando o destino dele
+  (ignora `--hotfix`/`--base`). No modo interativo, pula a pergunta editar/criar.
 - Checagem antecipada: se o provedor escolhido não tem key nem CLI, o script para antes
   de criar ou alterar o PR.
 - No Opus 5 via API, recusas dos classificadores de segurança passam pelo fallback
