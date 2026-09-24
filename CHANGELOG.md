@@ -30,6 +30,11 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   trocar de modelo (inclusive de provedor), tentar de novo com o mesmo ou desistir
   (o PR fica com o template). O prompt é o mesmo, então o contexto extra já digitado
   não se perde. Sem terminal ou com `--no-interactive`, desiste direto.
+- O contexto extra é salvo por repositório + branch em
+  `~/.cache/generate_pr/context/` assim que é definido. Se a geração falhar (ou a
+  execução for interrompida), a próxima execução interativa mostra o contexto salvo e
+  oferece usar, editar, escrever um novo ou descartar. O arquivo é apagado quando a
+  descrição é aplicada ao PR.
 
 ### Alterado
 

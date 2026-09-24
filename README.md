@@ -17,7 +17,8 @@ Principais recursos:
 - **Seleção dinâmica de modelos** consultando a API (apenas modelos Gemini *flash*).
 - **Troca de modelo em caso de falha** — após 2 falhas seguidas no mesmo modelo, o
   script pergunta se quer trocar de modelo (ou de provedor), tentar de novo ou desistir.
-- **Contexto adicional** ao prompt, além do diff.
+- **Contexto adicional** ao prompt, além do diff — salvo por branch até a descrição
+  ser aplicada, para não precisar redigitá-lo se a geração falhar.
 - **Experiência interativa moderna** com [`gum`](https://github.com/charmbracelet/gum)
   (navegação por setas, busca incremental, sem menus numéricos).
 - **Detecção de ClickUp** pelo nome da branch, com link automático no template.
@@ -191,7 +192,9 @@ Acionado automaticamente quando o script roda **sem flags** em um terminal
    provedores configurados). No Gemini, `gum filter` sobre os modelos *flash*
    disponíveis (a primeira opção mantém o `GEMINI_MODEL`); no Claude, `gum choose`
    entre **Sonnet**, **Opus** e **Haiku**.
-5. **Contexto adicional** — `gum confirm` + editor multilinha `gum write`.
+5. **Contexto adicional** — `gum confirm` + editor multilinha `gum write`. Se uma
+   execução anterior desta branch falhou, o contexto digitado nela é mostrado e o
+   script oferece **usar**, **editar**, **escrever um novo** ou **descartar**.
 
 ### Modo não-interativo (flags)
 
@@ -274,7 +277,8 @@ um novo PR é criado.
    (CI) ou com `--no-interactive`, desiste direto. O resultado é salvo em cache.
 8. **Atualiza** o corpo do PR via `gh api PATCH`.
 
-Se a etapa 7 falhar, o PR continua válido com o template — basta rodar de novo.
+Se a etapa 7 falhar, o PR continua válido com o template — basta rodar de novo. O
+contexto extra fica salvo e é oferecido de volta na próxima execução interativa.
 
 ---
 
@@ -283,6 +287,12 @@ Se a etapa 7 falhar, o PR continua válido com o template — basta rodar de nov
 As descrições geradas ficam em `~/.cache/generate_pr/`, com chave derivada de
 **branch + provedor/modelo + contexto + diff**. Mudar qualquer um desses regenera a descrição;
 caso contrário, o conteúdo em cache é reutilizado (evita chamadas repetidas à IA).
+
+O contexto extra também fica salvo ali, em
+`~/.cache/generate_pr/context/<repositório>/<branch>.md` (com `/` da branch trocado
+por `__`). Ele é gravado assim que você o define e apagado quando a descrição é
+aplicada ao PR; se a geração falhar (ou você cancelar), ele continua lá para a próxima
+execução.
 
 Para limpar:
 

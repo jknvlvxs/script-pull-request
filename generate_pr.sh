@@ -181,6 +181,33 @@ provider_available() {
   esac
 }
 
+# Cache das descrições geradas e do contexto extra salvo.
+CACHE_DIR="$HOME/.cache/generate_pr"
+
+# Contexto extra salvo por repositório + branch, para não precisar redigitá-lo quando
+# a geração falha. É gravado assim que o contexto é definido e apagado depois que a
+# descrição é aplicada ao PR.
+context_file() {
+  local repo
+  repo=$(basename "$(git rev-parse --show-toplevel)")
+  printf '%s/context/%s/%s.md' "$CACHE_DIR" "$repo" "${CURRENT_BRANCH//\//__}"
+}
+
+save_context() {
+  local file
+  file=$(context_file)
+  mkdir -p "$(dirname "$file")"
+  printf '%s\n' "$EXTRA_CONTEXT" > "$file"
+}
+
+# Editor multilinha do contexto. Uso: edit_context [texto inicial]
+edit_context() {
+  gum write \
+    --placeholder "Descreva o contexto (Ctrl+D para enviar)..." \
+    --width 90 --height 8 \
+    --value "${1:-}"
+}
+
 # Lista as branches remotas (sem o HEAD), uma por linha.
 remote_branches() {
   git branch -r --format='%(refname:short)' \
@@ -641,15 +668,36 @@ if [ "$INTERACTIVE" = true ]; then
   # 4) Provedor (Gemini/Claude) e modelo
   choose_model
 
-  # 5) Contexto adicional (gum confirm + gum write multilinha)
-  if ui_confirm "Adicionar contexto extra ao prompt?" --default=false; then
-    if ! EXTRA_CONTEXT=$(gum write \
-      --placeholder "Descreva o contexto (Ctrl+D para enviar)..." \
-      --width 90 --height 8); then
+  # 5) Contexto adicional (gum write multilinha). Se sobrou um contexto salvo de uma
+  #    execução que falhou, oferece reaproveitá-lo em vez de redigitar.
+  _saved_file=$(context_file)
+  if [ -s "$_saved_file" ]; then
+    _saved=$(cat "$_saved_file")
+    _preview=$(printf '%s\n' "$_saved" | head -n 12)
+    [ "$(printf '%s\n' "$_saved" | wc -l)" -gt 12 ] && _preview="$_preview"$'\n…'
+    gum style --border rounded --padding "0 1" --border-foreground 240 "$_preview"
+    if ! _ctx_action=$(gum choose \
+      "Usar o contexto salvo" \
+      "Editar o contexto salvo" \
+      "Escrever um novo contexto" \
+      "Descartar o contexto salvo e seguir sem contexto" \
+      --header "Há um contexto extra salvo de uma execução anterior"); then
       _abort_cancel
     fi
+    case "$_ctx_action" in
+      Usar*)     EXTRA_CONTEXT="$_saved" ;;
+      Editar*)   EXTRA_CONTEXT=$(edit_context "$_saved") || _abort_cancel ;;
+      Escrever*) EXTRA_CONTEXT=$(edit_context) || _abort_cancel ;;
+      *)         EXTRA_CONTEXT=""; rm -f "$_saved_file" ;;
+    esac
+  elif ui_confirm "Adicionar contexto extra ao prompt?" --default=false; then
+    EXTRA_CONTEXT=$(edit_context) || _abort_cancel
   fi
 fi
+
+# Salva o contexto já aqui: se algo falhar daqui em diante (push, IA, Ctrl+C), a
+# próxima execução interativa o oferece de volta.
+[ -n "$EXTRA_CONTEXT" ] && save_context
 
 # Falha antes de criar/alterar o PR se o provedor escolhido não tiver como rodar.
 if ! provider_available "$AI_PROVIDER"; then
@@ -872,7 +920,6 @@ $EXTRA_CONTEXT
 "
 fi
 
-CACHE_DIR="$HOME/.cache/generate_pr"
 mkdir -p "$CACHE_DIR"
 # Arquivo de cache para o provedor/modelo atual (recalculado se o modelo for trocado).
 cache_file() {
@@ -919,6 +966,9 @@ EOF
   else
     ui_log error "Não foi possível gerar a descrição com a IA."
     ui_log info "O PR #$PR_NUMBER já foi criado com o template. Rode o script novamente mais tarde para preencher a descrição."
+    if [ -n "$EXTRA_CONTEXT" ]; then
+      ui_log info "💾 Contexto extra salvo em $(context_file) — será oferecido na próxima execução interativa."
+    fi
     PR_BODY=""
   fi
 fi
@@ -940,6 +990,9 @@ if [ -n "$PR_BODY" ]; then
 
   gh api "${API_ARGS[@]}" > /dev/null
   rm -f "$TEMP_BODY_FILE"
+
+  # A descrição foi aplicada: o contexto salvo já cumpriu seu papel.
+  [ -n "$EXTRA_CONTEXT" ] && rm -f "$(context_file)"
 fi
 
 # Garante o assignee (caso o PR já existisse)
