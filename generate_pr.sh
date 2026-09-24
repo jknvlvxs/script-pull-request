@@ -57,15 +57,30 @@ ui_success() {
 }
 
 # Spinner para comandos demorados (sem capturar saída). Propaga o exit code.
+# Fora de um terminal (CI, Claude Code) o gum spin só gera códigos ANSI na saída:
+# nesse caso roda o comando direto e mostra a saída apenas se ele falhar.
 ui_spin() {
   local title="$1"; shift
-  gum spin --spinner dot --title "$title" -- "$@"
+  if [ -t 2 ]; then
+    gum spin --spinner dot --title "$title" -- "$@"
+    return
+  fi
+  local out rc=0
+  ui_log info "$title"
+  out=$("$@" 2>&1) || rc=$?
+  [ "$rc" -ne 0 ] && printf '%s\n' "$out" >&2
+  return "$rc"
 }
 
 # Spinner que captura a saída padrão do comando (para fetch de dados).
 ui_spin_capture() {
   local title="$1"; shift
-  gum spin --spinner dot --title "$title" --show-output -- "$@"
+  if [ -t 2 ]; then
+    gum spin --spinner dot --title "$title" --show-output -- "$@"
+  else
+    ui_log info "$title"
+    "$@"
+  fi
 }
 
 # Encerra o script quando o usuário cancela um prompt do gum (Ctrl+C / Esc).
