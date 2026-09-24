@@ -21,6 +21,8 @@ Principais recursos:
   ser aplicada, para não precisar redigitá-lo se a geração falhar.
 - **Experiência interativa moderna** com [`gum`](https://github.com/charmbracelet/gum)
   (navegação por setas, busca incremental, sem menus numéricos).
+- **Skill `/pullrequest` para o Claude Code** — roda o script de dentro de uma sessão,
+  com as perguntas feitas pelo Claude e o contexto extra montado a partir da conversa.
 - **Detecção de ClickUp** pelo nome da branch, com link automático no template.
 - **Cache** por branch + modelo + contexto + diff.
 
@@ -36,6 +38,7 @@ Principais recursos:
 - [Uso](#uso)
   - [Modo interativo](#modo-interativo)
   - [Modo não-interativo (flags)](#modo-não-interativo-flags)
+  - [Dentro do Claude Code (`/pullrequest`)](#dentro-do-claude-code-pullrequest)
 - [Opções / Flags](#opções--flags)
 - [Variáveis de ambiente](#variáveis-de-ambiente)
 - [Como funciona o fluxo](#como-funciona-o-fluxo)
@@ -227,6 +230,40 @@ A checagem de PR existente filtra pela branch de **destino**: se já houver um P
 aberto para o mesmo destino, ele é reutilizado e só a descrição é atualizada; se o
 destino for diferente (ex.: `--hotfix` para `main` enquanto há um PR para `release`),
 um novo PR é criado.
+
+### Dentro do Claude Code (`/pullrequest`)
+
+A skill em [`skills/pullrequest/SKILL.md`](skills/pullrequest/SKILL.md) permite usar o
+script numa sessão do Claude Code. Instale uma vez, com um link simbólico (a skill
+continua versionada aqui):
+
+```bash
+ln -s ~/scripts/skills/pullrequest ~/.claude/skills/pullrequest
+```
+
+Depois, na branch do PR, dentro do Claude Code:
+
+```text
+/pullrequest                          # pergunta destino, draft, modelo e contexto
+/pullrequest hotfix draft opus        # sem perguntas sobre o que já foi dito
+/pullrequest edit sonnet              # só regenera a descrição do PR aberto
+/pullrequest o timeout vinha do retry sem backoff   # texto livre vira contexto
+```
+
+Como funciona:
+
+- O Claude Code não tem terminal para o `gum`, então o script roda sempre com
+  `--no-interactive`; as perguntas do modo interativo (destino, draft, modelo e
+  contexto) são feitas pelo Claude numa única tela. Argumentos já informados não são
+  perguntados.
+- O **contexto extra** é proposto pelo Claude a partir da conversa (motivação,
+  decisões, como testar), do texto livre dos argumentos e do contexto salvo de uma
+  execução que falhou. Você vê a proposta antes e pode trocar ou dispensar.
+- **Quem escreve a descrição continua sendo o script**, com o modelo escolhido. Se ele
+  falhar 2 vezes seguidas, o Claude pergunta para qual modelo trocar e roda de novo com
+  `--edit`, mantendo o contexto.
+- A skill só roda quando você digita `/pullrequest` (`disable-model-invocation`), já que
+  ela faz push e cria/altera o PR.
 
 ---
 

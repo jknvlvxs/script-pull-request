@@ -12,6 +12,11 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ### Adicionado
 
+- Skill `/pullrequest` para o Claude Code (`skills/pullrequest/SKILL.md`, instalada com
+  um link simbólico em `~/.claude/skills/`). Roda o script com `--no-interactive`,
+  faz as perguntas do modo interativo com a UI do Claude Code, propõe o contexto
+  extra a partir da conversa e, se a geração falhar, oferece trocar de modelo e roda
+  de novo com `--edit`.
 - Geração da descrição com **Claude**, escolhendo entre **Sonnet**, **Opus** e
   **Haiku**. Usa a Messages API quando há `ANTHROPIC_API_KEY` e, sem ela, o `claude`
   CLI (Claude Code) em modo não interativo, sem ferramentas, com a conta já logada.
