@@ -155,14 +155,16 @@ DEFAULT_TEMPLATE='## 📋 Descrição
 
 <!-- Passos para validar manualmente as mudanças. -->'
 
-# Lista modelos da API que suportam generateContent (apenas família gemini).
+# Lista apenas os modelos Gemini *flash* de texto que suportam generateContent, do
+# mais novo para o mais antigo. Fica de fora: pro, lite, image, tts, audio, etc.
+# pageSize=1000: sem ele a API devolve só 50 modelos (paginado) e alguns sumiam.
 list_models() {
   local key="$1"
-  curl -s -m 20 -H "x-goog-api-key: $key" "$API_BASE/models" \
+  curl -s -m 20 -H "x-goog-api-key: $key" "$API_BASE/models?pageSize=1000" \
     | jq -r '.models[]? | select(.supportedGenerationMethods[]? == "generateContent") | .name' \
     | sed 's@models/@@' \
-    | grep -E '^gemini' \
-    | sort || true
+    | grep -E '^gemini-([0-9.]+-)?flash(-latest|-preview(-[0-9-]+)?)?$' \
+    | sort -rV || true
 }
 
 # Gera conteúdo chamando a API REST diretamente (evita o roteador interno do gemini CLI).
@@ -291,7 +293,7 @@ if [ "$LIST_MODELS" = true ]; then
     ui_log error "Nenhuma API key encontrada (defina GEMINI_API_KEY ou crie $API_KEY_FILE)."
     exit 1
   fi
-  echo "📋 Modelos disponíveis (suportam generateContent):"
+  echo "📋 Modelos Gemini flash disponíveis:"
   list_models "$GEMINI_API_KEY_RESOLVED" | sed 's/^/  - /'
   exit 0
 fi
@@ -389,7 +391,7 @@ if [ "$INTERACTIVE" = true ]; then
   if [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
     export API_BASE
     export -f list_models
-    MODELS_RAW=$(ui_spin_capture "Buscando modelos Gemini disponíveis..." \
+    MODELS_RAW=$(ui_spin_capture "Buscando modelos Gemini flash disponíveis..." \
       bash -c 'list_models "$0"' "$GEMINI_API_KEY_RESOLVED")
     if [ -n "$MODELS_RAW" ]; then
       _KEEP_OPT="» Manter modelo atual ($GEMINI_MODEL)"

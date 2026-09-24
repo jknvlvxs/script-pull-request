@@ -12,7 +12,7 @@ Principais recursos:
 - **Geração via API REST do Gemini** (curl + jq), evitando o roteador interno do
   `gemini` CLI (que causava o erro `NumericalClassifierStrategy`). Com fallback para o
   `gemini` CLI quando não há API key.
-- **Seleção dinâmica de modelos** consultando a API.
+- **Seleção dinâmica de modelos** consultando a API (apenas modelos Gemini *flash*).
 - **Contexto adicional** ao prompt, além do diff.
 - **Experiência interativa moderna** com [`gum`](https://github.com/charmbracelet/gum)
   (navegação por setas, busca incremental, sem menus numéricos).
@@ -163,7 +163,7 @@ Acionado automaticamente quando o script roda **sem flags** em um terminal
 2. **Draft?** — `gum confirm` (Sim/Não).
 3. **Branch de comparação** — `gum filter` com busca incremental sobre as branches
    remotas (Enter na opção "Usar base padrão" mantém o padrão).
-4. **Modelo Gemini** — `gum filter` com busca incremental sobre os modelos
+4. **Modelo Gemini** — `gum filter` com busca incremental sobre os modelos *flash*
    disponíveis (a primeira opção mantém o `GEMINI_MODEL` configurado).
 5. **Contexto adicional** — `gum confirm` + editor multilinha `gum write`.
 
@@ -206,7 +206,7 @@ um novo PR é criado.
 | `--model <nome>` | nome do modelo | Define o modelo Gemini (ex.: `gemini-2.5-flash`). |
 | `--context "<texto>"` | texto | Adiciona contexto ao prompt (pode ser combinado com `--context-file`). |
 | `--context-file <arquivo>` | caminho | Adiciona o conteúdo de um arquivo como contexto. |
-| `--list-models` | — | Lista os modelos disponíveis (que suportam `generateContent`) e sai. |
+| `--list-models` | — | Lista os modelos Gemini *flash* disponíveis (mais novo primeiro) e sai. |
 | `-i`, `--interactive` | — | Força o modo interativo. |
 | `--no-interactive` | — | Força o modo não-interativo. |
 

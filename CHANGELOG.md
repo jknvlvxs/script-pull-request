@@ -10,8 +10,18 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ## [Não lançado]
 
+### Alterado
+
+- A lista de modelos Gemini (seleção interativa e `--list-models`) mostra apenas os
+  modelos *flash* de texto, do mais novo para o mais antigo. Variantes pro, lite,
+  image, tts e afins ficam de fora (ainda é possível usá-las via `--model`).
+- `.env.example` sugere um modelo flash (`gemini-3.5-flash`) em vez do
+  `gemini-2.5-pro`.
+
 ### Corrigido
 
+- A listagem de modelos lia só a primeira página da API (50 modelos) e podia omitir
+  modelos novos; agora pede `pageSize=1000`.
 - O `GEMINI_MODEL` definido no `.env` era ignorado: o default do código era atribuído
   antes de carregar o `.env`, e o loader não sobrescreve variáveis já definidas. O
   default agora é aplicado depois do `.env`.
