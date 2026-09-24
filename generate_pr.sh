@@ -15,7 +15,7 @@ TARGET_OVERRIDE=""
 API_BASE="https://generativelanguage.googleapis.com/v1beta"
 
 # Modelo padrão. Pode ser sobrescrito via env GEMINI_MODEL, flag --model ou seleção interativa.
-GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.5-flash}"
 
 # ─────────────────────────────────────────────────────────────
 # Dependências obrigatórias (falha cedo). Usa echo puro pois não
@@ -164,16 +164,31 @@ list_models() {
 }
 
 # Gera conteúdo chamando a API REST diretamente (evita o roteador interno do gemini CLI).
+# O prompt e o payload são gravados em arquivos temporários para não estourar o ARG_MAX
+# do shell com diffs grandes (jq --rawfile + curl -d @arquivo).
 generate_via_rest() {
   local prompt="$1" key="$2" model="$3"
-  local req resp text
+  local prompt_file payload_file resp text rc
 
-  req=$(jq -n --arg t "$prompt" '{contents:[{parts:[{text:$t}]}]}')
+  prompt_file=$(mktemp)
+  payload_file=$(mktemp)
+  # Garante limpeza dos temporários ao sair da função.
+  trap 'rm -f "$prompt_file" "$payload_file"' RETURN
 
-  resp=$(printf '%s' "$req" | curl -s -m 120 \
+  printf '%s' "$prompt" > "$prompt_file"
+
+  # Monta o JSON lendo o prompt do arquivo (não passa pela linha de comando).
+  if ! jq -n --rawfile t "$prompt_file" \
+    '{contents:[{parts:[{text:$t}]}]}' > "$payload_file"; then
+    ui_log error "Falha ao montar o payload JSON."
+    return 1
+  fi
+
+  # Envia o corpo a partir do arquivo (evita limites de argv).
+  resp=$(curl -s -m 180 \
     -H "Content-Type: application/json" \
     -H "x-goog-api-key: $key" \
-    -X POST -d @- \
+    -X POST --data-binary "@$payload_file" \
     "$API_BASE/models/$model:generateContent")
 
   if printf '%s' "$resp" | jq -e '.error' >/dev/null 2>&1; then
