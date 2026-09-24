@@ -220,8 +220,8 @@ Passar qualquer flag desativa o modo interativo (ideal para automação/CI):
 ~/scripts/generate_pr.sh --list-models
 ```
 
-A checagem de PR existente filtra pela branch de **destino** (`--base`): se já houver
-um PR aberto para o mesmo destino, ele é reutilizado e a descrição é atualizada; se o
+A checagem de PR existente filtra pela branch de **destino**: se já houver um PR
+aberto para o mesmo destino, ele é reutilizado e só a descrição é atualizada; se o
 destino for diferente (ex.: `--hotfix` para `main` enquanto há um PR para `release`),
 um novo PR é criado.
 

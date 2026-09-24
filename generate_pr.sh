@@ -735,13 +735,18 @@ else
   ui_log info "🚀 Modo normal — PR será criado para $TARGET_BRANCH"
 fi
 
-# Ao criar um novo PR, bloqueia se o destino colidir com um PR já existente
-# (o GitHub só permite um PR aberto por par origem→destino).
+# Destino igual ao de um PR já aberto (o GitHub só permite um PR aberto por par
+# origem→destino). No modo interativo o usuário escolheu "Criar um novo PR", então é
+# erro; sem modo interativo o PR existente é reutilizado e só a descrição é refeita.
 if [ "$EDIT_EXISTING" != true ] && [ -n "$EXISTING_PR_NUMBER" ] \
    && [ "$EXISTING_PR_BASE" = "$TARGET_BRANCH" ]; then
-  ui_log error "Já existe PR #$EXISTING_PR_NUMBER de $CURRENT_BRANCH → $TARGET_BRANCH."
-  ui_log info "Escolha outro destino para o novo PR ou edite o existente."
-  exit 1
+  if [ "$INTERACTIVE" = true ]; then
+    ui_log error "Já existe PR #$EXISTING_PR_NUMBER de $CURRENT_BRANCH → $TARGET_BRANCH."
+    ui_log info "Escolha outro destino para o novo PR ou edite o existente."
+    exit 1
+  fi
+  EDIT_EXISTING=true
+  ui_log info "♻️ Reutilizando o PR existente #$EXISTING_PR_NUMBER — a descrição será atualizada."
 fi
 
 # Garante que a branch de destino existe no remoto.

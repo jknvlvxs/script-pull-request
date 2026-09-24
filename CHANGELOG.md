@@ -51,6 +51,10 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ### Corrigido
 
+- No modo não interativo, rodar de novo numa branch que já tem PR aberto para o mesmo
+  destino terminava com erro ("Já existe PR"), embora o README diga que o PR é
+  reutilizado. Agora o PR existente é reutilizado e só a descrição é atualizada; o
+  erro continua apenas quando, no modo interativo, se escolhe "Criar um novo PR".
 - A listagem de modelos lia só a primeira página da API (50 modelos) e podia omitir
   modelos novos; agora pede `pageSize=1000`.
 - O `GEMINI_MODEL` definido no `.env` era ignorado: o default do código era atribuído
