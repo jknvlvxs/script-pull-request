@@ -15,6 +15,8 @@ Principais recursos:
 - **Geração com Claude** (Sonnet, Opus ou Haiku) — via Messages API quando há
   `ANTHROPIC_API_KEY`, ou via `claude` CLI (Claude Code) usando a conta já logada.
 - **Seleção dinâmica de modelos** consultando a API (apenas modelos Gemini *flash*).
+- **Troca de modelo em caso de falha** — após 2 falhas seguidas no mesmo modelo, o
+  script pergunta se quer trocar de modelo (ou de provedor), tentar de novo ou desistir.
 - **Contexto adicional** ao prompt, além do diff.
 - **Experiência interativa moderna** com [`gum`](https://github.com/charmbracelet/gum)
   (navegação por setas, busca incremental, sem menus numéricos).
@@ -265,9 +267,11 @@ um novo PR é criado.
    arquivo não existir) e injeta o link do ClickUp (se a branch tiver um ID no formato
    `feat/868gfh2k9`).
 6. **Cria o PR** (ou detecta um existente) já com o template — com `--assignee @me`.
-7. Gera a **descrição com IA** com o provedor escolhido (3 tentativas). Gemini: API
-   REST, ou `gemini` CLI sem key. Claude: Messages API, ou `claude` CLI sem key.
-   O resultado é salvo em cache.
+7. Gera a **descrição com IA** com o provedor escolhido. Gemini: API REST, ou `gemini`
+   CLI sem key. Claude: Messages API, ou `claude` CLI sem key. Após **2 falhas
+   seguidas** no mesmo modelo, pergunta (via `gum choose`) se quer **trocar de modelo**,
+   tentar de novo ou desistir — o contexto extra já digitado é mantido. Sem terminal
+   (CI) ou com `--no-interactive`, desiste direto. O resultado é salvo em cache.
 8. **Atualiza** o corpo do PR via `gh api PATCH`.
 
 Se a etapa 7 falhar, o PR continua válido com o template — basta rodar de novo.
@@ -309,8 +313,9 @@ Era um problema do roteador interno do `gemini` CLI. Configure a `GEMINI_API_KEY
 usar a API REST diretamente e contornar o roteador.
 
 **`This model is currently experiencing high demand`**
-O modelo escolhido está sobrecarregado. O script tenta 3 vezes; troque de modelo com
-`--model` (ex.: `gemini-2.5-flash`) ou tente novamente mais tarde.
+O modelo escolhido está sobrecarregado. Após 2 tentativas o script oferece trocar de
+modelo ali mesmo (por exemplo, outro flash ou o Claude). Em modo não interativo, rode de
+novo com outro `--model` (ex.: `--model gemini-2.5-flash` ou `--model sonnet`).
 
 **`Claude indisponível: defina ANTHROPIC_API_KEY ou instale o claude CLI`**
 O provedor Claude foi escolhido (via `AI_PROVIDER`, `--provider` ou `--model`), mas não

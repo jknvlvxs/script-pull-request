@@ -26,6 +26,10 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 - No Opus 5 via API, recusas dos classificadores de segurança passam pelo fallback
   server-side da Anthropic (`fallbacks: "default"`), que refaz a chamada em outro
   modelo.
+- Troca de modelo após **2 falhas seguidas** na geração: o script pergunta se quer
+  trocar de modelo (inclusive de provedor), tentar de novo com o mesmo ou desistir
+  (o PR fica com o template). O prompt é o mesmo, então o contexto extra já digitado
+  não se perde. Sem terminal ou com `--no-interactive`, desiste direto.
 
 ### Alterado
 
@@ -34,6 +38,9 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   image, tts e afins ficam de fora (ainda é possível usá-las via `--model`).
 - `.env.example` sugere um modelo flash (`gemini-3.5-flash`) em vez do
   `gemini-2.5-pro`.
+- As tentativas por modelo caem de 3 para 2 antes de desistir ou oferecer a troca.
+- Quando o modelo é trocado durante a geração, o cache é salvo na chave do modelo que
+  de fato gerou a descrição.
 - A chave do cache passa a incluir o provedor (`provedor:modelo`), então descrições
   em cache de versões anteriores não são reaproveitadas.
 

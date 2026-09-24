@@ -7,6 +7,7 @@ DRAFT=false
 DIFF=false
 DIFF_BRANCH=""
 INTERACTIVE=false
+NO_INTERACTIVE=false
 LIST_MODELS=false
 EXTRA_CONTEXT=""
 TARGET_OVERRIDE=""
@@ -500,6 +501,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-interactive)
       INTERACTIVE=false
+      NO_INTERACTIVE=true
       shift
       ;;
     *)
@@ -809,24 +811,55 @@ generate_once() {
   fi
 }
 
-# Gera a descrição com retentativas no modelo atual.
+# Falhas seguidas no mesmo modelo antes de oferecer a troca.
+MAX_ATTEMPTS_PER_MODEL=2
+
+# Dá para abrir prompts? Exige terminal e respeita --no-interactive (CI/automação).
+# Vale também quando o script foi chamado com flags num terminal.
+can_prompt() {
+  [ -t 0 ] && [ "$NO_INTERACTIVE" != true ]
+}
+
+# Gera a descrição e a guarda em PR_BODY (sem subshell, para que uma troca de modelo
+# feita aqui valha para o resto do script). Após MAX_ATTEMPTS_PER_MODEL falhas seguidas
+# no mesmo modelo, pergunta se quer trocar de modelo, tentar de novo ou desistir; sem
+# terminal, desiste direto.
 generate_pr_body() {
   local prompt="$1"
   local attempt=1
-  local max_attempts=3
-  local out
+  local out action
 
-  while [ "$attempt" -le "$max_attempts" ]; do
+  while true; do
+    [ "$attempt" -eq 1 ] && ui_log info "🧠 Gerando conteúdo do PR ($(ai_model_label))..."
+
     if out=$(generate_once "$prompt") && [ -n "$out" ]; then
-      printf '%s' "$out"
+      PR_BODY="$out"
       return 0
     fi
-    ui_log warn "Tentativa $attempt/$max_attempts de gerar a descrição falhou..."
-    attempt=$((attempt + 1))
-    [ "$attempt" -le "$max_attempts" ] && sleep 2
-  done
 
-  return 1
+    ui_log warn "Tentativa $attempt/$MAX_ATTEMPTS_PER_MODEL com $(ai_model) falhou."
+    if [ "$attempt" -lt "$MAX_ATTEMPTS_PER_MODEL" ]; then
+      attempt=$((attempt + 1))
+      sleep 2
+      continue
+    fi
+
+    can_prompt || return 1
+
+    # Esc aqui equivale a desistir: o PR já existe com o template.
+    action=$(gum choose \
+      "Trocar de modelo" \
+      "Tentar de novo com $(ai_model)" \
+      "Desistir (o PR fica com o template)" \
+      --header "$MAX_ATTEMPTS_PER_MODEL falhas seguidas com $(ai_model_label)") || return 1
+
+    case "$action" in
+      Trocar*) choose_model ;;
+      Tentar*) ;;
+      *)       return 1 ;;
+    esac
+    attempt=1
+  done
 }
 
 # Bloco de contexto adicional (só entra no prompt se houver conteúdo)
@@ -841,8 +874,13 @@ fi
 
 CACHE_DIR="$HOME/.cache/generate_pr"
 mkdir -p "$CACHE_DIR"
-CACHE_KEY=$(printf '%s\n%s\n%s\n%s' "$CURRENT_BRANCH" "$AI_PROVIDER:$(ai_model)" "$EXTRA_CONTEXT" "$GIT_DIFF" | sha256sum | cut -d' ' -f1)
-CACHE_FILE="$CACHE_DIR/$CACHE_KEY"
+# Arquivo de cache para o provedor/modelo atual (recalculado se o modelo for trocado).
+cache_file() {
+  printf '%s/%s' "$CACHE_DIR" \
+    "$(printf '%s\n%s\n%s\n%s' "$CURRENT_BRANCH" "$AI_PROVIDER:$(ai_model)" "$EXTRA_CONTEXT" "$GIT_DIFF" \
+      | sha256sum | cut -d' ' -f1)"
+}
+CACHE_FILE=$(cache_file)
 
 PR_BODY=""
 
@@ -850,8 +888,6 @@ if [ -f "$CACHE_FILE" ]; then
   ui_log info "💾 Usando conteúdo do PR em cache (diff/contexto/modelo não mudaram)..."
   PR_BODY=$(cat "$CACHE_FILE")
 else
-  ui_log info "🧠 Gerando conteúdo do PR ($(ai_model_label))..."
-
   PROMPT=$(cat <<EOF
 Você é um assistente de desenvolvimento sênior. Sua tarefa é preencher o template de Pull Request (PR) com base no git diff fornecido.
 
@@ -877,10 +913,11 @@ RESULTADO:
 EOF
 )
 
-  if PR_BODY=$(generate_pr_body "$PROMPT"); then
-    printf '%s' "$PR_BODY" > "$CACHE_FILE"
+  if generate_pr_body "$PROMPT"; then
+    # O modelo pode ter sido trocado durante a geração: salva na chave do modelo final.
+    printf '%s' "$PR_BODY" > "$(cache_file)"
   else
-    ui_log error "Não foi possível gerar a descrição com a IA após várias tentativas."
+    ui_log error "Não foi possível gerar a descrição com a IA."
     ui_log info "O PR #$PR_NUMBER já foi criado com o template. Rode o script novamente mais tarde para preencher a descrição."
     PR_BODY=""
   fi
