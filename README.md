@@ -19,6 +19,8 @@ Principais recursos:
 - **Detecção de ClickUp** pelo nome da branch, com link automático no template.
 - **Cache** por branch + modelo + contexto + diff.
 
+> Histórico de mudanças: veja o [CHANGELOG.md](CHANGELOG.md).
+
 ---
 
 ## Sumário
