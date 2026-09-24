@@ -10,6 +10,23 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ## [Não lançado]
 
+### Adicionado
+
+- Geração da descrição com **Claude**, escolhendo entre **Sonnet**, **Opus** e
+  **Haiku**. Usa a Messages API quando há `ANTHROPIC_API_KEY` e, sem ela, o `claude`
+  CLI (Claude Code) em modo não interativo, sem ferramentas, com a conta já logada.
+- Passo "Provedor e modelo" no modo interativo: escolhe Gemini ou Claude (só aparecem
+  os provedores configurados) e depois o modelo.
+- Flag `--provider` e variáveis `AI_PROVIDER`, `CLAUDE_MODEL` e `ANTHROPIC_API_KEY`.
+  `--model` deduz o provedor pelo nome (`gemini-*` → Gemini; `sonnet`/`opus`/`haiku`/
+  `claude-*` → Claude).
+- `--list-models` também mostra os apelidos do Claude.
+- Checagem antecipada: se o provedor escolhido não tem key nem CLI, o script para antes
+  de criar ou alterar o PR.
+- No Opus 5 via API, recusas dos classificadores de segurança passam pelo fallback
+  server-side da Anthropic (`fallbacks: "default"`), que refaz a chamada em outro
+  modelo.
+
 ### Alterado
 
 - A lista de modelos Gemini (seleção interativa e `--list-models`) mostra apenas os
@@ -17,6 +34,8 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   image, tts e afins ficam de fora (ainda é possível usá-las via `--model`).
 - `.env.example` sugere um modelo flash (`gemini-3.5-flash`) em vez do
   `gemini-2.5-pro`.
+- A chave do cache passa a incluir o provedor (`provedor:modelo`), então descrições
+  em cache de versões anteriores não são reaproveitadas.
 
 ### Corrigido
 

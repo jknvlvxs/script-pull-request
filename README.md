@@ -2,7 +2,7 @@
 
 Gera (ou atualiza) um Pull Request no GitHub a partir da branch atual, criando o PR
 primeiro com o template e depois preenchendo a descrição automaticamente com IA
-(Gemini) a partir do `git diff`.
+(Gemini ou Claude) a partir do `git diff`.
 
 Principais recursos:
 
@@ -12,6 +12,8 @@ Principais recursos:
 - **Geração via API REST do Gemini** (curl + jq), evitando o roteador interno do
   `gemini` CLI (que causava o erro `NumericalClassifierStrategy`). Com fallback para o
   `gemini` CLI quando não há API key.
+- **Geração com Claude** (Sonnet, Opus ou Haiku) — via Messages API quando há
+  `ANTHROPIC_API_KEY`, ou via `claude` CLI (Claude Code) usando a conta já logada.
 - **Seleção dinâmica de modelos** consultando a API (apenas modelos Gemini *flash*).
 - **Contexto adicional** ao prompt, além do diff.
 - **Experiência interativa moderna** com [`gum`](https://github.com/charmbracelet/gum)
@@ -45,10 +47,11 @@ Principais recursos:
 |------------|-------------|----------|
 | `git`      | sim         | diff, branch, push |
 | `gh` ([GitHub CLI](https://cli.github.com/)) | sim | criar/atualizar PR (precisa estar autenticado: `gh auth login`) |
-| `curl`     | sim         | chamadas à API do Gemini |
+| `curl`     | sim         | chamadas às APIs do Gemini e da Anthropic |
 | `jq`       | sim         | parsing das respostas da API |
 | `gum` ([Charm gum](https://github.com/charmbracelet/gum)) | sim | UI interativa (navegação por setas, busca incremental) e feedback visual |
-| `node` + `gemini` CLI | opcional | usado apenas como fallback quando **não** há API key |
+| `node` + `gemini` CLI | opcional | usado apenas como fallback quando **não** há `GEMINI_API_KEY` |
+| `claude` CLI ([Claude Code](https://claude.com/claude-code)) | opcional | gera com Claude quando **não** há `ANTHROPIC_API_KEY` (precisa estar logado) |
 
 > O script verifica as dependências obrigatórias no início e **encerra com erro** se
 > alguma estiver ausente.
@@ -101,6 +104,8 @@ gh auth login               # autenticar no GitHub
 
 ## Configuração da API key
 
+### Gemini
+
 O script usa a Generative Language API (Google AI Studio). A key é resolvida nesta
 ordem de precedência:
 
@@ -137,6 +142,23 @@ printf '%s' "sua_key_aqui" > ~/.config/generate_pr/api_key
 chmod 600 ~/.config/generate_pr/api_key
 ```
 
+### Claude
+
+Há dois jeitos de usar o Claude, escolhidos automaticamente:
+
+1. **Messages API** — se `ANTHROPIC_API_KEY` estiver definida (env ou `.env`). Os
+   apelidos viram os IDs `claude-sonnet-5`, `claude-opus-5` e `claude-haiku-4-5`.
+2. **`claude` CLI** — sem a key, o script chama `claude -p` (Claude Code) sem
+   ferramentas, usando a conta em que você já está logado. Não precisa de configuração
+   extra além de `claude` instalado e autenticado.
+
+```dotenv
+# opcional: use o Claude por padrão
+AI_PROVIDER=claude
+CLAUDE_MODEL=sonnet          # sonnet | opus | haiku (ou um ID completo)
+ANTHROPIC_API_KEY=           # opcional; sem ela o claude CLI é usado
+```
+
 > ⚠️ **Nunca** coloque a key dentro do `generate_pr.sh` — o arquivo é versionado.
 
 ---
@@ -163,8 +185,10 @@ Acionado automaticamente quando o script roda **sem flags** em um terminal
 2. **Draft?** — `gum confirm` (Sim/Não).
 3. **Branch de comparação** — `gum filter` com busca incremental sobre as branches
    remotas (Enter na opção "Usar base padrão" mantém o padrão).
-4. **Modelo Gemini** — `gum filter` com busca incremental sobre os modelos *flash*
-   disponíveis (a primeira opção mantém o `GEMINI_MODEL` configurado).
+4. **Provedor e modelo** — `gum choose` entre **Gemini** e **Claude** (só aparecem os
+   provedores configurados). No Gemini, `gum filter` sobre os modelos *flash*
+   disponíveis (a primeira opção mantém o `GEMINI_MODEL`); no Claude, `gum choose`
+   entre **Sonnet**, **Opus** e **Haiku**.
 5. **Contexto adicional** — `gum confirm` + editor multilinha `gum write`.
 
 ### Modo não-interativo (flags)
@@ -174,6 +198,9 @@ Passar qualquer flag desativa o modo interativo (ideal para automação/CI):
 ```bash
 # PR normal, modelo flash, com contexto inline
 ~/scripts/generate_pr.sh --no-interactive --model gemini-2.5-flash --context "Foco no fix de timeout"
+
+# Gerar a descrição com o Claude Opus
+~/scripts/generate_pr.sh --no-interactive --model opus
 
 # Hotfix em draft
 ~/scripts/generate_pr.sh --hotfix --draft
@@ -203,10 +230,11 @@ um novo PR é criado.
 | `--base`, `--target` | branch | Define manualmente a branch de **destino** do PR (validada contra o remoto). |
 | `--draft` | — | Cria o PR como rascunho. |
 | `--diff [branch]` | branch (opcional) | Compara o diff com a branch informada; sem valor, usa `origin/HEAD`. |
-| `--model <nome>` | nome do modelo | Define o modelo Gemini (ex.: `gemini-2.5-flash`). |
+| `--model <nome>` | nome do modelo | Define o modelo. `gemini-*` usa o Gemini; `sonnet`, `opus`, `haiku` ou `claude-*` usam o Claude; outros nomes valem para o provedor atual. |
+| `--provider <nome>` | `gemini` ou `claude` | Define o provedor de IA (normalmente desnecessário: `--model` já o deduz). |
 | `--context "<texto>"` | texto | Adiciona contexto ao prompt (pode ser combinado com `--context-file`). |
 | `--context-file <arquivo>` | caminho | Adiciona o conteúdo de um arquivo como contexto. |
-| `--list-models` | — | Lista os modelos Gemini *flash* disponíveis (mais novo primeiro) e sai. |
+| `--list-models` | — | Lista os modelos Gemini *flash* disponíveis (mais novo primeiro) e os apelidos do Claude, e sai. |
 | `-i`, `--interactive` | — | Força o modo interativo. |
 | `--no-interactive` | — | Força o modo não-interativo. |
 
@@ -219,7 +247,10 @@ um novo PR é criado.
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `GEMINI_API_KEY` | — | API key do Gemini (Google AI Studio). |
-| `GEMINI_MODEL` | `gemini-3.5-flash` | Modelo padrão. Precedência: `--model`/seleção interativa > variável de ambiente > `.env` > default do código. |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Modelo Gemini padrão. Precedência: `--model`/seleção interativa > variável de ambiente > `.env` > default do código. |
+| `AI_PROVIDER` | `gemini` | Provedor padrão: `gemini` ou `claude`. |
+| `CLAUDE_MODEL` | `sonnet` | Modelo Claude padrão: `sonnet`, `opus`, `haiku` ou um ID completo (ex.: `claude-opus-5-5`). |
+| `ANTHROPIC_API_KEY` | — | API key da Anthropic. Sem ela, o Claude roda pelo `claude` CLI. |
 | `GENERATE_PR_ENV_FILE` | `<dir do script>/.env` | Caminho alternativo para o arquivo `.env`. |
 
 ---
@@ -234,8 +265,9 @@ um novo PR é criado.
    arquivo não existir) e injeta o link do ClickUp (se a branch tiver um ID no formato
    `feat/868gfh2k9`).
 6. **Cria o PR** (ou detecta um existente) já com o template — com `--assignee @me`.
-7. Gera a **descrição com IA** (API REST do Gemini, 3 tentativas; fallback para o
-   `gemini` CLI se não houver key). Resultado é salvo em cache.
+7. Gera a **descrição com IA** com o provedor escolhido (3 tentativas). Gemini: API
+   REST, ou `gemini` CLI sem key. Claude: Messages API, ou `claude` CLI sem key.
+   O resultado é salvo em cache.
 8. **Atualiza** o corpo do PR via `gh api PATCH`.
 
 Se a etapa 7 falhar, o PR continua válido com o template — basta rodar de novo.
@@ -245,7 +277,7 @@ Se a etapa 7 falhar, o PR continua válido com o template — basta rodar de nov
 ## Cache
 
 As descrições geradas ficam em `~/.cache/generate_pr/`, com chave derivada de
-**branch + modelo + contexto + diff**. Mudar qualquer um desses regenera a descrição;
+**branch + provedor/modelo + contexto + diff**. Mudar qualquer um desses regenera a descrição;
 caso contrário, o conteúdo em cache é reutilizado (evita chamadas repetidas à IA).
 
 Para limpar:
@@ -279,6 +311,15 @@ usar a API REST diretamente e contornar o roteador.
 **`This model is currently experiencing high demand`**
 O modelo escolhido está sobrecarregado. O script tenta 3 vezes; troque de modelo com
 `--model` (ex.: `gemini-2.5-flash`) ou tente novamente mais tarde.
+
+**`Claude indisponível: defina ANTHROPIC_API_KEY ou instale o claude CLI`**
+O provedor Claude foi escolhido (via `AI_PROVIDER`, `--provider` ou `--model`), mas não
+há key nem `claude` no `PATH`. Instale o Claude Code e rode `claude` uma vez para logar,
+ou defina `ANTHROPIC_API_KEY`.
+
+**`claude CLI: ...` / `API Claude: ...`**
+Mensagem de erro repassada do Claude (modelo inválido, sessão expirada, key inválida,
+limite de uso). Para o CLI, confira se `claude -p "oi"` funciona no terminal.
 
 **PR não foi criado / falha de autenticação do `gh`**
 Rode `gh auth login` e confirme acesso ao repositório.

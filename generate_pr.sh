@@ -10,14 +10,19 @@ INTERACTIVE=false
 LIST_MODELS=false
 EXTRA_CONTEXT=""
 TARGET_OVERRIDE=""
+MODEL_OVERRIDE=""
 
 # Endpoint da Generative Language API (usada diretamente via curl quando há API key).
 API_BASE="https://generativelanguage.googleapis.com/v1beta"
 
+# Endpoint da Messages API da Anthropic (usada via curl quando há ANTHROPIC_API_KEY).
+ANTHROPIC_API_BASE="https://api.anthropic.com/v1"
+
 # ─────────────────────────────────────────────────────────────
 # Dependências obrigatórias (falha cedo). Usa echo puro pois não
 # podemos depender do gum para reportar a ausência do gum.
-# O gemini CLI é opcional (fallback apenas quando não há API key).
+# Os CLIs gemini e claude são opcionais (usados só quando não há a
+# respectiva API key).
 # ─────────────────────────────────────────────────────────────
 _missing_dep=
 for _dep in gum gh jq curl git; do
@@ -113,6 +118,11 @@ load_env_file "${GENERATE_PR_ENV_FILE:-$SCRIPT_DIR/.env}"
 # Precedência: flag --model / seleção interativa > env real > .env > default abaixo.
 GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.5-flash}"
 
+# Provedor de IA (gemini | claude) e modelo Claude (sonnet | opus | haiku, ou um ID
+# completo como claude-opus-5-5). Mesma precedência do GEMINI_MODEL.
+AI_PROVIDER="${AI_PROVIDER:-gemini}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
+
 # Resolução da API key (NUNCA hardcode aqui — este arquivo é versionado):
 #   1. env GEMINI_API_KEY (inclui valores vindos do .env)
 #   2. arquivo ~/.config/generate_pr/api_key (recomendado: chmod 600)
@@ -126,6 +136,49 @@ resolve_api_key() {
   fi
 }
 GEMINI_API_KEY_RESOLVED=$(resolve_api_key)
+
+# Claude: com ANTHROPIC_API_KEY (env ou .env) usa a Messages API; sem ela, usa o
+# claude CLI (Claude Code) em modo não interativo, com a conta já logada.
+
+# Traduz o apelido escolhido (sonnet/opus/haiku) para o ID do modelo na API.
+# Qualquer outro valor é tratado como ID completo e repassado como está.
+claude_api_model_id() {
+  case "$1" in
+    sonnet) printf '%s' "claude-sonnet-5" ;;
+    opus)   printf '%s' "claude-opus-5" ;;
+    haiku)  printf '%s' "claude-haiku-4-5" ;;
+    *)      printf '%s' "$1" ;;
+  esac
+}
+
+# Modelo em uso pelo provedor atual.
+ai_model() {
+  if [ "$AI_PROVIDER" = claude ]; then
+    printf '%s' "$CLAUDE_MODEL"
+  else
+    printf '%s' "$GEMINI_MODEL"
+  fi
+}
+
+# Rótulo legível para logs (ex.: "Claude · sonnet via claude CLI").
+ai_model_label() {
+  local via
+  if [ "$AI_PROVIDER" = claude ]; then
+    [ -n "$ANTHROPIC_API_KEY" ] && via="API da Anthropic" || via="claude CLI"
+  else
+    [ -n "$GEMINI_API_KEY_RESOLVED" ] && via="API REST" || via="gemini CLI"
+  fi
+  printf '%s · %s via %s' "${AI_PROVIDER^}" "$(ai_model)" "$via"
+}
+
+# O provedor tem como ser usado (API key ou CLI instalado)?
+provider_available() {
+  case "$1" in
+    gemini) [ -n "$GEMINI_API_KEY_RESOLVED" ] || command -v gemini >/dev/null 2>&1 ;;
+    claude) [ -n "$ANTHROPIC_API_KEY" ] || command -v claude >/dev/null 2>&1 ;;
+    *)      return 1 ;;
+  esac
+}
 
 # Lista as branches remotas (sem o HEAD), uma por linha.
 remote_branches() {
@@ -167,10 +220,10 @@ list_models() {
     | sort -rV || true
 }
 
-# Gera conteúdo chamando a API REST diretamente (evita o roteador interno do gemini CLI).
-# O prompt e o payload são gravados em arquivos temporários para não estourar o ARG_MAX
-# do shell com diffs grandes (jq --rawfile + curl -d @arquivo).
-generate_via_rest() {
+# Gera conteúdo chamando a API REST do Gemini diretamente (evita o roteador interno do
+# gemini CLI). O prompt e o payload são gravados em arquivos temporários para não estourar
+# o ARG_MAX do shell com diffs grandes (jq --rawfile + curl -d @arquivo).
+generate_via_gemini_api() {
   local prompt="$1" key="$2" model="$3"
   local prompt_file payload_file resp text rc
 
@@ -209,6 +262,168 @@ generate_via_rest() {
   printf '%s' "$text"
 }
 
+# Gera conteúdo pela Messages API da Anthropic. Mesmo esquema de arquivos temporários
+# do Gemini para suportar diffs grandes.
+generate_via_claude_api() {
+  local prompt="$1" key="$2" model="$3"
+  local prompt_file payload_file resp text stop
+  local -a beta_header=()
+  local fallback=false
+
+  prompt_file=$(mktemp)
+  payload_file=$(mktemp)
+  trap 'rm -f "$prompt_file" "$payload_file"' RETURN
+
+  printf '%s' "$prompt" > "$prompt_file"
+
+  # No Opus 5, se o classificador de segurança recusar o pedido (acontece com diffs de
+  # código sensível), a própria API refaz a chamada em outro modelo.
+  if [ "$model" = "claude-opus-5" ]; then
+    fallback=true
+    beta_header=(-H "anthropic-beta: server-side-fallback-2026-07-01")
+  fi
+
+  if ! jq -n --rawfile t "$prompt_file" --arg m "$model" --argjson fb "$fallback" \
+    '{model:$m, max_tokens:16000, messages:[{role:"user", content:$t}]}
+     + (if $fb then {fallbacks:"default"} else {} end)' > "$payload_file"; then
+    ui_log error "Falha ao montar o payload JSON."
+    return 1
+  fi
+
+  resp=$(curl -s -m 300 \
+    -H "content-type: application/json" \
+    -H "x-api-key: $key" \
+    -H "anthropic-version: 2023-06-01" \
+    "${beta_header[@]}" \
+    -X POST --data-binary "@$payload_file" \
+    "$ANTHROPIC_API_BASE/messages")
+
+  if printf '%s' "$resp" | jq -e '.type == "error"' >/dev/null 2>&1; then
+    ui_log error "API Claude: $(printf '%s' "$resp" | jq -r '.error.message // "erro desconhecido"')"
+    return 1
+  fi
+
+  stop=$(printf '%s' "$resp" | jq -r '.stop_reason // empty')
+  if [ "$stop" = "refusal" ]; then
+    ui_log error "O Claude recusou gerar a descrição (stop_reason=refusal)."
+    return 1
+  fi
+
+  # Com adaptive thinking a resposta pode trazer blocos "thinking"; só o texto importa.
+  text=$(printf '%s' "$resp" | jq -r '[.content[]? | select(.type == "text") | .text] | join("")')
+
+  if [ -z "$text" ] || [ "$text" = "null" ]; then
+    return 1
+  fi
+
+  [ "$stop" = "max_tokens" ] && ui_log warn "A resposta atingiu o limite de tokens e pode estar incompleta."
+
+  printf '%s' "$text"
+}
+
+# Gera conteúdo pelo claude CLI (Claude Code) em modo não interativo, usando a conta já
+# logada. Sem ferramentas e com system prompt próprio: o modelo só devolve o texto.
+generate_via_claude_cli() {
+  local prompt="$1" model="$2" out rc=0
+
+  out=$(printf '%s' "$prompt" | claude -p \
+    --model "$model" \
+    --tools "" \
+    --no-session-persistence \
+    --output-format text \
+    --system-prompt "Você preenche templates de Pull Request a partir de um git diff. Responda somente com o Markdown pedido, sem comentários antes ou depois." \
+    2>/dev/null) || rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    # Em caso de erro o claude CLI escreve o motivo no stdout.
+    ui_log error "claude CLI: $(printf '%s' "$out" | head -n1)"
+    return 1
+  fi
+
+  printf '%s' "$out"
+}
+
+# Seleção interativa do modelo Gemini (apenas flash). Sem API key não há como listar,
+# então mantém o GEMINI_MODEL configurado.
+choose_gemini_model() {
+  local models_raw keep_opt model
+
+  if [ -z "$GEMINI_API_KEY_RESOLVED" ]; then
+    ui_log warn "Sem GEMINI_API_KEY não é possível listar modelos; mantendo '$GEMINI_MODEL'."
+    return 0
+  fi
+
+  export API_BASE
+  export -f list_models
+  models_raw=$(ui_spin_capture "Buscando modelos Gemini flash disponíveis..." \
+    bash -c 'list_models "$0"' "$GEMINI_API_KEY_RESOLVED")
+  if [ -z "$models_raw" ]; then
+    ui_log warn "Não foi possível listar modelos; mantendo '$GEMINI_MODEL'."
+    return 0
+  fi
+
+  keep_opt="» Manter modelo atual ($GEMINI_MODEL)"
+  if ! model=$( { printf '%s\n' "$keep_opt"; printf '%s\n' "$models_raw"; } \
+    | gum filter --placeholder "Filtrar o modelo Gemini..." --height 15); then
+    _abort_cancel
+  fi
+  if [ "$model" != "$keep_opt" ] && [ -n "$model" ]; then
+    GEMINI_MODEL="$model"
+  fi
+}
+
+# Seleção interativa do modelo Claude (Sonnet, Opus ou Haiku).
+choose_claude_model() {
+  local sonnet="Sonnet — equilíbrio entre qualidade e velocidade"
+  local opus="Opus — mais capaz, mais lento"
+  local haiku="Haiku — mais rápido e econômico"
+  local -a opts=()
+  local keep_opt="" selected choice
+
+  # Um ID completo vindo do .env/--model continua disponível como primeira opção.
+  case "$CLAUDE_MODEL" in
+    sonnet) selected="$sonnet" ;;
+    opus)   selected="$opus" ;;
+    haiku)  selected="$haiku" ;;
+    *)      keep_opt="» Manter modelo atual ($CLAUDE_MODEL)"; selected="$keep_opt"; opts+=("$keep_opt") ;;
+  esac
+  opts+=("$sonnet" "$opus" "$haiku")
+
+  if ! choice=$(gum choose "${opts[@]}" --header "Modelo Claude" --selected "$selected"); then
+    _abort_cancel
+  fi
+  case "$choice" in
+    Sonnet*) CLAUDE_MODEL=sonnet ;;
+    Opus*)   CLAUDE_MODEL=opus ;;
+    Haiku*)  CLAUDE_MODEL=haiku ;;
+  esac
+}
+
+# Seleção interativa de provedor + modelo. Só oferece os provedores utilizáveis;
+# com apenas um disponível, pula direto para a escolha do modelo.
+choose_model() {
+  local -a providers=()
+  local provider
+
+  provider_available gemini && providers+=("Gemini")
+  provider_available claude && providers+=("Claude")
+
+  if [ ${#providers[@]} -eq 0 ]; then
+    ui_log error "Nenhum provedor de IA disponível (configure GEMINI_API_KEY/ANTHROPIC_API_KEY ou instale o gemini/claude CLI)."
+    exit 1
+  elif [ ${#providers[@]} -eq 1 ]; then
+    provider="${providers[0]}"
+  elif ! provider=$(gum choose "${providers[@]}" --header "Provedor de IA" \
+    --selected "${AI_PROVIDER^}"); then
+    _abort_cancel
+  fi
+
+  case "$provider" in
+    Claude) AI_PROVIDER=claude; choose_claude_model ;;
+    *)      AI_PROVIDER=gemini; choose_gemini_model ;;
+  esac
+}
+
 # Sem argumentos + terminal interativo => entra no modo interativo por padrão
 if [ $# -eq 0 ] && [ -t 0 ]; then
   INTERACTIVE=true
@@ -236,7 +451,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --model)
       if [[ -n "$2" && "$2" != --* ]]; then
-        GEMINI_MODEL="$2"
+        MODEL_OVERRIDE="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    --provider)
+      if [[ -n "$2" && "$2" != --* ]]; then
+        AI_PROVIDER="$2"
         shift 2
       else
         shift
@@ -285,16 +508,42 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# --model define o provedor quando o nome é reconhecível (gemini-* → Gemini;
+# sonnet/opus/haiku/claude-* → Claude). Outros nomes valem para o provedor atual.
+if [ -n "$MODEL_OVERRIDE" ]; then
+  case "$MODEL_OVERRIDE" in
+    gemini-*)                   AI_PROVIDER=gemini ;;
+    sonnet|opus|haiku|claude-*) AI_PROVIDER=claude ;;
+  esac
+  if [ "$AI_PROVIDER" = claude ]; then
+    CLAUDE_MODEL="$MODEL_OVERRIDE"
+  else
+    GEMINI_MODEL="$MODEL_OVERRIDE"
+  fi
+fi
+
+case "$AI_PROVIDER" in
+  gemini|claude) ;;
+  *)
+    ui_log error "Provedor de IA inválido: '$AI_PROVIDER' (use gemini ou claude)."
+    exit 1
+    ;;
+esac
+
 # ─────────────────────────────────────────────────────────────
 # --list-models: apenas lista os modelos disponíveis e sai
 # ─────────────────────────────────────────────────────────────
 if [ "$LIST_MODELS" = true ]; then
-  if [ -z "$GEMINI_API_KEY_RESOLVED" ]; then
-    ui_log error "Nenhuma API key encontrada (defina GEMINI_API_KEY ou crie $API_KEY_FILE)."
-    exit 1
+  if [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
+    echo "📋 Modelos Gemini flash disponíveis:"
+    list_models "$GEMINI_API_KEY_RESOLVED" | sed 's/^/  - /'
+  else
+    ui_log warn "Sem GEMINI_API_KEY (ou $API_KEY_FILE) não é possível listar os modelos Gemini."
   fi
-  echo "📋 Modelos Gemini flash disponíveis:"
-  list_models "$GEMINI_API_KEY_RESOLVED" | sed 's/^/  - /'
+  echo "📋 Modelos Claude (use o apelido em --model):"
+  for _alias in sonnet opus haiku; do
+    echo "  - $_alias ($(claude_api_model_id "$_alias"))"
+  done
   exit 0
 fi
 
@@ -387,26 +636,8 @@ if [ "$INTERACTIVE" = true ]; then
     DIFF_BRANCH="$_chosen"
   fi
 
-  # 4) Modelo Gemini (gum filter — busca incremental, padrão pré-selecionado)
-  if [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
-    export API_BASE
-    export -f list_models
-    MODELS_RAW=$(ui_spin_capture "Buscando modelos Gemini flash disponíveis..." \
-      bash -c 'list_models "$0"' "$GEMINI_API_KEY_RESOLVED")
-    if [ -n "$MODELS_RAW" ]; then
-      _KEEP_OPT="» Manter modelo atual ($GEMINI_MODEL)"
-      _models_list=$( { printf '%s\n' "$_KEEP_OPT"; printf '%s\n' "$MODELS_RAW"; } )
-      if ! _model=$(printf '%s\n' "$_models_list" \
-        | gum filter --placeholder "Filtrar o modelo Gemini..." --height 15); then
-        _abort_cancel
-      fi
-      if [ "$_model" != "$_KEEP_OPT" ] && [ -n "$_model" ]; then
-        GEMINI_MODEL="$_model"
-      fi
-    else
-      ui_log warn "Não foi possível listar modelos; mantendo '$GEMINI_MODEL'."
-    fi
-  fi
+  # 4) Provedor (Gemini/Claude) e modelo
+  choose_model
 
   # 5) Contexto adicional (gum confirm + gum write multilinha)
   if ui_confirm "Adicionar contexto extra ao prompt?" --default=false; then
@@ -417,6 +648,17 @@ if [ "$INTERACTIVE" = true ]; then
     fi
   fi
 fi
+
+# Falha antes de criar/alterar o PR se o provedor escolhido não tiver como rodar.
+if ! provider_available "$AI_PROVIDER"; then
+  if [ "$AI_PROVIDER" = claude ]; then
+    ui_log error "Claude indisponível: defina ANTHROPIC_API_KEY ou instale o claude CLI (Claude Code)."
+  else
+    ui_log error "Gemini indisponível: defina GEMINI_API_KEY ou instale o gemini CLI."
+  fi
+  exit 1
+fi
+ui_log info "🤖 Modelo: $(ai_model_label)"
 
 # ─────────────────────────────────────────────────────────────
 # Resolve branch de comparação e branch alvo
@@ -549,7 +791,25 @@ fi
 # 2º) Gera a descrição com IA (com cache, retentativas e tolerância a falha)
 # ─────────────────────────────────────────────────────────────
 
-# Tenta gerar via API REST (se houver key) ou via gemini CLI (fallback), com retentativas.
+# Uma tentativa de geração com o provedor/modelo atual. Cada provedor usa a API
+# quando há key e o CLI correspondente como fallback. Imprime o texto no stdout.
+generate_once() {
+  local prompt="$1"
+
+  if [ "$AI_PROVIDER" = claude ]; then
+    if [ -n "$ANTHROPIC_API_KEY" ]; then
+      generate_via_claude_api "$prompt" "$ANTHROPIC_API_KEY" "$(claude_api_model_id "$CLAUDE_MODEL")"
+    else
+      generate_via_claude_cli "$prompt" "$CLAUDE_MODEL"
+    fi
+  elif [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
+    generate_via_gemini_api "$prompt" "$GEMINI_API_KEY_RESOLVED" "$GEMINI_MODEL"
+  else
+    printf '%s' "$prompt" | node --max-old-space-size=8192 "$(which gemini)" -m "$GEMINI_MODEL" 2>/dev/null
+  fi
+}
+
+# Gera a descrição com retentativas no modelo atual.
 generate_pr_body() {
   local prompt="$1"
   local attempt=1
@@ -557,17 +817,9 @@ generate_pr_body() {
   local out
 
   while [ "$attempt" -le "$max_attempts" ]; do
-    if [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
-      if out=$(generate_via_rest "$prompt" "$GEMINI_API_KEY_RESOLVED" "$GEMINI_MODEL") && [ -n "$out" ]; then
-        printf '%s' "$out"
-        return 0
-      fi
-    else
-      if out=$(printf '%s' "$prompt" | node --max-old-space-size=8192 "$(which gemini)" -m "$GEMINI_MODEL" 2>/dev/null) \
-        && [ -n "$out" ]; then
-        printf '%s' "$out"
-        return 0
-      fi
+    if out=$(generate_once "$prompt") && [ -n "$out" ]; then
+      printf '%s' "$out"
+      return 0
     fi
     ui_log warn "Tentativa $attempt/$max_attempts de gerar a descrição falhou..."
     attempt=$((attempt + 1))
@@ -589,7 +841,7 @@ fi
 
 CACHE_DIR="$HOME/.cache/generate_pr"
 mkdir -p "$CACHE_DIR"
-CACHE_KEY=$(printf '%s\n%s\n%s\n%s' "$CURRENT_BRANCH" "$GEMINI_MODEL" "$EXTRA_CONTEXT" "$GIT_DIFF" | sha256sum | cut -d' ' -f1)
+CACHE_KEY=$(printf '%s\n%s\n%s\n%s' "$CURRENT_BRANCH" "$AI_PROVIDER:$(ai_model)" "$EXTRA_CONTEXT" "$GIT_DIFF" | sha256sum | cut -d' ' -f1)
 CACHE_FILE="$CACHE_DIR/$CACHE_KEY"
 
 PR_BODY=""
@@ -598,11 +850,7 @@ if [ -f "$CACHE_FILE" ]; then
   ui_log info "💾 Usando conteúdo do PR em cache (diff/contexto/modelo não mudaram)..."
   PR_BODY=$(cat "$CACHE_FILE")
 else
-  if [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
-    ui_log info "🧠 Gerando conteúdo do PR via API REST (modelo: $GEMINI_MODEL)..."
-  else
-    ui_log info "🧠 Gerando conteúdo do PR via gemini CLI (modelo: $GEMINI_MODEL)..."
-  fi
+  ui_log info "🧠 Gerando conteúdo do PR ($(ai_model_label))..."
 
   PROMPT=$(cat <<EOF
 Você é um assistente de desenvolvimento sênior. Sua tarefa é preencher o template de Pull Request (PR) com base no git diff fornecido.
