@@ -21,6 +21,56 @@ API_BASE="https://generativelanguage.googleapis.com/v1beta"
 # Endpoint da Messages API da Anthropic (usada via curl quando há ANTHROPIC_API_KEY).
 ANTHROPIC_API_BASE="https://api.anthropic.com/v1"
 
+# Ajuda do comando. Texto puro: precisa funcionar antes da checagem de dependências.
+usage() {
+  local cmd
+  cmd="${0##*/}"
+  cat <<EOF
+Uso: $cmd [opções]
+
+Cria (ou atualiza) o Pull Request da branch atual e preenche a descrição com
+IA a partir do diff. Sem opções, num terminal, abre o modo interativo.
+
+Destino do PR:
+  --hotfix                    PR para main/master (padrão: release)
+  --base, --target <branch>   define a branch de destino
+  --edit                      só atualiza a descrição do PR aberto da branch
+  --draft                     cria o PR como rascunho
+
+Descrição:
+  --model <nome>              opus | sonnet | haiku | claude-* | gemini-*
+                              (padrão: opus, ou o que estiver no .env)
+  --provider <nome>           claude | gemini (normalmente deduzido do --model)
+  --context "<texto>"         contexto extra para o prompt (pode repetir)
+  --context-file <arquivo>    contexto extra lido de um arquivo
+  --diff [branch]             gera o diff contra outra branch (padrão:
+                              main/master; sem valor, a branch padrão do remoto)
+
+Execução:
+  -i, --interactive           força o modo interativo
+  --no-interactive            não pergunta nada e aplica a descrição direto (CI)
+  --verify                    roda os hooks de pre-push (pulados por padrão)
+  --list-models               lista os modelos disponíveis e sai
+  -h, --help                  mostra esta ajuda
+
+Exemplos:
+  $cmd                                modo interativo
+  $cmd --hotfix --draft               hotfix como rascunho
+  $cmd --edit --model sonnet          refaz a descrição do PR aberto
+  $cmd --context "Corrige o timeout"  acrescenta contexto ao prompt
+
+Configuração em ~/.config/generate_pr/.env (provedor, modelo, API keys e
+preferências como publicar sem revisão e abrir o PR no navegador).
+Documentação completa no README.md do repositório.
+EOF
+}
+
+for _arg in "$@"; do
+  case "$_arg" in
+    -h|--help) usage; exit 0 ;;
+  esac
+done
+
 # ─────────────────────────────────────────────────────────────
 # Dependências obrigatórias (falha cedo). Usa echo puro pois não
 # podemos depender do gum para reportar a ausência do gum.
@@ -152,6 +202,52 @@ else
   load_env_file "$SCRIPT_DIR/.env"
   load_env_file "$CONFIG_ENV_FILE"
 fi
+
+# Valor booleano de configuração (true/1/yes/sim). Qualquer outro valor é falso.
+is_true() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    true|1|yes|y|sim|s) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Grava KEY=VALUE no arquivo de configuração (o GENERATE_PR_ENV_FILE, se definido;
+# senão o ~/.config/generate_pr/.env), substituindo a linha se ela já existir.
+save_setting() {
+  local key="$1" value="$2" file="${GENERATE_PR_ENV_FILE:-$CONFIG_ENV_FILE}" tmp
+  mkdir -p "$(dirname "$file")"
+  if [ ! -e "$file" ]; then
+    : > "$file"
+    chmod 600 "$file"
+  fi
+  if [ -f "$file" ] && grep -q "^$key=" "$file"; then
+    tmp=$(mktemp)
+    awk -v k="$key" -v v="$value" 'index($0, k "=") == 1 { print k "=" v; next } { print }' "$file" > "$tmp"
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+# Preferência perguntada uma única vez: se a variável não estiver definida (env ou
+# .env) e houver alguém no terminal, pergunta, grava a resposta no arquivo de
+# configuração e não pergunta mais. Sem terminal, vale o padrão.
+# Uso: ask_once <VARIAVEL> <padrão: true|false> <pergunta>
+ask_once() {
+  local key="$1" default="$2" question="$3" answer=false
+  [ -n "${!key:-}" ] && return 0
+  if ! can_prompt; then
+    printf -v "$key" '%s' "$default"
+    return 0
+  fi
+  if ui_confirm "$question" --default="$default"; then
+    answer=true
+  fi
+  printf -v "$key" '%s' "$answer"
+  save_setting "$key" "$answer"
+  ui_log info "Preferência salva: $key=$answer em ${GENERATE_PR_ENV_FILE:-$CONFIG_ENV_FILE} (edite lá para mudar)."
+}
 
 # Modelo padrão — definido só DEPOIS de carregar o .env, senão o default do código
 # ocupa a variável e o GEMINI_MODEL do .env é ignorado.
@@ -624,6 +720,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
+      ui_log warn "Argumento desconhecido ignorado: $1 (veja ${0##*/} --help)"
       shift
       ;;
   esac
@@ -1201,10 +1298,12 @@ if ! obtain_body; then
   fi
 fi
 
-# Com alguém no terminal, a descrição passa por revisão antes de ir para o PR.
+# Por padrão a descrição vai direto para o PR. Com AUTO_PUBLISH_DESCRIPTION=false
+# (e alguém no terminal), passa antes pela revisão.
 APPLY_BODY=false
 if [ -n "$PR_BODY" ]; then
-  if ! can_prompt; then
+  ask_once AUTO_PUBLISH_DESCRIPTION true "Publicar as descrições geradas direto no PR, sem revisar antes?"
+  if ! can_prompt || is_true "$AUTO_PUBLISH_DESCRIPTION"; then
     APPLY_BODY=true
   elif review_body; then
     APPLY_BODY=true
@@ -1242,7 +1341,11 @@ PR_URL=$(gh pr view "$PR_NUMBER" --json url --jq .url 2>/dev/null || true)
 ui_success "PR #$PR_NUMBER pronto!"
 if [ -n "$PR_URL" ]; then
   ui_log info "🔗 $PR_URL"
-  if can_prompt && ui_confirm "Abrir o PR no navegador?" --default=false; then
-    gh pr view "$PR_NUMBER" --web > /dev/null 2>&1 || ui_log warn "Não foi possível abrir o navegador."
+  # Só com alguém no terminal: em CI e com --no-interactive nunca abre.
+  if can_prompt; then
+    ask_once OPEN_PR_IN_BROWSER true "Abrir o PR no navegador ao terminar?"
+    if is_true "$OPEN_PR_IN_BROWSER"; then
+      gh pr view "$PR_NUMBER" --web > /dev/null 2>&1 || ui_log warn "Não foi possível abrir o navegador."
+    fi
   fi
 fi
