@@ -12,8 +12,8 @@ Principais recursos:
 - **Geração via API REST do Gemini** (curl + jq), evitando o roteador interno do
   `gemini` CLI (que causava o erro `NumericalClassifierStrategy`). Com fallback para o
   `gemini` CLI quando não há API key.
-- **Geração com Claude** (Sonnet, Opus ou Haiku) — via Messages API quando há
-  `ANTHROPIC_API_KEY`, ou via `claude` CLI (Claude Code) usando a conta já logada.
+- **Geração com Claude** (Opus por padrão, ou Sonnet/Haiku) — via Messages API quando
+  há `ANTHROPIC_API_KEY`, ou via `claude` CLI (Claude Code) usando a conta já logada.
 - **Seleção dinâmica de modelos** consultando a API (apenas modelos Gemini *flash*).
 - **Troca de modelo em caso de falha** — após 2 falhas seguidas no mesmo modelo, o
   script pergunta se quer trocar de modelo (ou de provedor), tentar de novo ou desistir.
@@ -150,18 +150,19 @@ chmod 600 ~/.config/generate_pr/api_key
 
 ### Claude
 
-Há dois jeitos de usar o Claude, escolhidos automaticamente:
+O Claude Opus é o provedor e modelo padrão. Há dois jeitos de usá-lo, escolhidos
+automaticamente:
 
 1. **Messages API** — se `ANTHROPIC_API_KEY` estiver definida (env ou `.env`). Os
-   apelidos viram os IDs `claude-sonnet-5`, `claude-opus-5` e `claude-haiku-4-5`.
+   apelidos viram os IDs `claude-sonnet-5`, `claude-opus-5-5` e `claude-haiku-4-5`.
 2. **`claude` CLI** — sem a key, o script chama `claude -p` (Claude Code) sem
    ferramentas, usando a conta em que você já está logado. Não precisa de configuração
    extra além de `claude` instalado e autenticado.
 
 ```dotenv
-# opcional: use o Claude por padrão
-AI_PROVIDER=claude
-CLAUDE_MODEL=sonnet          # sonnet | opus | haiku (ou um ID completo)
+# opcional: troque o padrão (Claude Opus)
+AI_PROVIDER=claude           # claude | gemini
+CLAUDE_MODEL=opus            # opus | sonnet | haiku (ou um ID completo)
 ANTHROPIC_API_KEY=           # opcional; sem ela o claude CLI é usado
 ```
 
@@ -294,8 +295,8 @@ Como funciona:
 |----------|--------|-----------|
 | `GEMINI_API_KEY` | — | API key do Gemini (Google AI Studio). |
 | `GEMINI_MODEL` | `gemini-3.5-flash` | Modelo Gemini padrão. Precedência: `--model`/seleção interativa > variável de ambiente > `.env` > default do código. |
-| `AI_PROVIDER` | `gemini` | Provedor padrão: `gemini` ou `claude`. |
-| `CLAUDE_MODEL` | `sonnet` | Modelo Claude padrão: `sonnet`, `opus`, `haiku` ou um ID completo (ex.: `claude-opus-5-5`). |
+| `AI_PROVIDER` | `claude` | Provedor padrão: `claude` ou `gemini`. |
+| `CLAUDE_MODEL` | `opus` | Modelo Claude padrão: `sonnet`, `opus`, `haiku` ou um ID completo (ex.: `claude-opus-5-5`). |
 | `ANTHROPIC_API_KEY` | — | API key da Anthropic. Sem ela, o Claude roda pelo `claude` CLI. |
 | `GENERATE_PR_ENV_FILE` | `<dir do script>/.env` | Caminho alternativo para o arquivo `.env`. |
 

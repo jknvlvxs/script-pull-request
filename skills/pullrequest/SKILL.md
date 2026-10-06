@@ -66,8 +66,9 @@ Pergunte **só o que os argumentos não definiram**, tudo na mesma chamada:
    (Recommended), que vira `--edit`. Depois: "Normal → release", "Hotfix →
    main/master". Outra branch de destino chega pelo "Other".
 2. **Draft** — só quando não há PR aberto: "Não" / "Sim, como rascunho".
-3. **Modelo** — "Padrão configurado" (sem `--model`; usa o `.env`), "Claude Sonnet",
-   "Claude Opus", "Claude Haiku". Um modelo Gemini específico chega pelo "Other".
+3. **Modelo** — "Padrão configurado" (sem `--model`; Claude Opus, salvo outro no
+   `.env`), "Claude Sonnet", "Claude Opus", "Claude Haiku". Um modelo Gemini
+   específico chega pelo "Other".
 4. **Contexto extra** — só se houver o que propor (veja abaixo). Opção "Usar este
    contexto" com o texto proposto no `preview`, e "Sem contexto adicional". Um texto
    próprio chega pelo "Other".

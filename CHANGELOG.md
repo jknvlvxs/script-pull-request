@@ -30,7 +30,7 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   (ignora `--hotfix`/`--base`). No modo interativo, pula a pergunta editar/criar.
 - Checagem antecipada: se o provedor escolhido não tem key nem CLI, o script para antes
   de criar ou alterar o PR.
-- No Opus 5 via API, recusas dos classificadores de segurança passam pelo fallback
+- No Opus via API, recusas dos classificadores de segurança passam pelo fallback
   server-side da Anthropic (`fallbacks: "default"`), que refaz a chamada em outro
   modelo.
 - Troca de modelo após **2 falhas seguidas** na geração: o script pergunta se quer
@@ -45,6 +45,11 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ### Alterado
 
+- **Claude Opus** passa a ser o padrão: `AI_PROVIDER` vale `claude` e `CLAUDE_MODEL`
+  vale `opus` quando não definidos (antes, `gemini` e `sonnet`). O Gemini continua
+  disponível via `AI_PROVIDER=gemini`, `--provider gemini` ou `--model gemini-*`.
+- Na Messages API, o apelido `opus` aponta para o `claude-opus-5-5` (antes,
+  `claude-opus-5`), com o mesmo fallback server-side em caso de recusa.
 - A lista de modelos Gemini (seleção interativa e `--list-models`) mostra apenas os
   modelos *flash* de texto, do mais novo para o mais antigo. Variantes pro, lite,
   image, tts e afins ficam de fora (ainda é possível usá-las via `--model`).

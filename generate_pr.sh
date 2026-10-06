@@ -137,8 +137,8 @@ GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.5-flash}"
 
 # Provedor de IA (gemini | claude) e modelo Claude (sonnet | opus | haiku, ou um ID
 # completo como claude-opus-5-5). Mesma precedência do GEMINI_MODEL.
-AI_PROVIDER="${AI_PROVIDER:-gemini}"
-CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
+AI_PROVIDER="${AI_PROVIDER:-claude}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
 
 # Resolução da API key (NUNCA hardcode aqui — este arquivo é versionado):
 #   1. env GEMINI_API_KEY (inclui valores vindos do .env)
@@ -162,7 +162,7 @@ GEMINI_API_KEY_RESOLVED=$(resolve_api_key)
 claude_api_model_id() {
   case "$1" in
     sonnet) printf '%s' "claude-sonnet-5" ;;
-    opus)   printf '%s' "claude-opus-5" ;;
+    opus)   printf '%s' "claude-opus-5-5" ;;
     haiku)  printf '%s' "claude-haiku-4-5" ;;
     *)      printf '%s' "$1" ;;
   esac
@@ -177,7 +177,7 @@ ai_model() {
   fi
 }
 
-# Rótulo legível para logs (ex.: "Claude · sonnet via claude CLI").
+# Rótulo legível para logs (ex.: "Claude · opus via claude CLI").
 ai_model_label() {
   local via
   if [ "$AI_PROVIDER" = claude ]; then
@@ -320,12 +320,14 @@ generate_via_claude_api() {
 
   printf '%s' "$prompt" > "$prompt_file"
 
-  # No Opus 5, se o classificador de segurança recusar o pedido (acontece com diffs de
-  # código sensível), a própria API refaz a chamada em outro modelo.
-  if [ "$model" = "claude-opus-5" ]; then
-    fallback=true
-    beta_header=(-H "anthropic-beta: server-side-fallback-2026-07-01")
-  fi
+  # No Opus 5/5.5, se o classificador de segurança recusar o pedido (acontece com diffs
+  # de código sensível), a própria API refaz a chamada em outro modelo.
+  case "$model" in
+    claude-opus-5|claude-opus-5-5)
+      fallback=true
+      beta_header=(-H "anthropic-beta: server-side-fallback-2026-07-01")
+      ;;
+  esac
 
   if ! jq -n --rawfile t "$prompt_file" --arg m "$model" --argjson fb "$fallback" \
     '{model:$m, max_tokens:16000, messages:[{role:"user", content:$t}]}
