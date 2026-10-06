@@ -19,8 +19,9 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   rodado de novo; `--uninstall` remove o comando e a skill.
 - Configuração em `~/.config/generate_pr/.env`, lida depois do `.env` ao lado do script.
 - Passo a passo de instalação no README (rápida e manual).
-- Revisão da descrição antes de aplicar (no terminal): aplicar, editar no `$VISUAL`/
-  `$EDITOR`, gerar de novo (com a opção de ajustar o contexto) ou não aplicar.
+- Revisão opcional da descrição antes de publicar (`AUTO_PUBLISH_DESCRIPTION=false`,
+  no terminal): aplicar, editar no `$VISUAL`/`$EDITOR`, gerar de novo (com a opção de
+  ajustar o contexto) ou não aplicar. Por padrão a descrição é publicada direto.
 - Ao atualizar um PR (`--edit` ou PR reaproveitado), a descrição atual vai para o
   prompt, para o modelo manter o que o autor escreveu à mão, e os checkboxes já
   marcados (como o checklist) continuam marcados.
@@ -29,7 +30,11 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 - Flag `--verify` para rodar os hooks de pre-push (continuam pulados por padrão).
 - Proteções no terminal: o script recusa rodar em `main`, `master`, `release` ou com
   HEAD destacado e avisa sobre alterações não commitadas.
-- A URL do PR aparece no fim, com a opção de abrir no navegador.
+- A URL do PR aparece no fim e, num terminal, o PR abre no navegador
+  (`OPEN_PR_IN_BROWSER`, padrão `true`).
+- Preferências perguntadas uma única vez: na primeira execução num terminal, o
+  script pergunta se publica sem revisão e se abre o navegador, e grava as respostas
+  no `~/.config/generate_pr/.env`. Depois, só mudam editando o arquivo.
 - `-h`/`--help` lista todas as opções, com exemplos. Funciona mesmo sem as
   dependências instaladas.
 - Skill `/pullrequest` para o Claude Code (`skills/pullrequest/SKILL.md`, instalada com

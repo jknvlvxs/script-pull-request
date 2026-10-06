@@ -25,8 +25,9 @@ Principais recursos:
   com as perguntas feitas pelo Claude e o contexto extra montado a partir da conversa.
 - **Detecção de ClickUp** pelo nome da branch (em qualquer posição), com link
   automático no template.
-- **Revisão antes de aplicar** — no terminal, a descrição é mostrada para aplicar,
-  editar no seu editor ou gerar de novo.
+- **Publicação direta ou com revisão** — por padrão a descrição vai direto para o
+  PR e o PR abre no navegador; com `AUTO_PUBLISH_DESCRIPTION=false`, ela é mostrada
+  antes para aplicar, editar no seu editor ou gerar de novo.
 - **Edições preservadas** — ao atualizar um PR, os checkboxes já marcados (como o
   checklist) continuam marcados, e o que o autor escreveu à mão vai para o prompt.
 - **Cache** por branch + modelo + prompt (diff, commits, contexto, template).
@@ -249,13 +250,19 @@ Acionado automaticamente quando o script roda **sem flags** em um terminal
 5. **Contexto adicional** — `gum confirm` + editor multilinha `gum write`. Se uma
    execução anterior desta branch falhou, o contexto digitado nela é mostrado e o
    script oferece **usar**, **editar**, **escrever um novo** ou **descartar**.
-6. **Revisão da descrição** — depois de gerada, a descrição é mostrada formatada e o
-   script pergunta: **aplicar no PR**, **editar antes de aplicar** (abre o `$VISUAL`
-   ou `$EDITOR`; sem eles, o `vi`), **gerar de novo** (com a opção de ajustar o
-   contexto) ou **não aplicar**. No fim, oferece abrir o PR no navegador.
+6. **Publicação** — por padrão a descrição gerada vai direto para o PR e, no fim, o
+   PR abre no navegador. Com `AUTO_PUBLISH_DESCRIPTION=false`, a descrição é mostrada
+   formatada antes e o script pergunta: **aplicar no PR**, **editar antes de
+   aplicar** (abre o `$VISUAL` ou `$EDITOR`; sem eles, o `vi`), **gerar de novo**
+   (com a opção de ajustar o contexto) ou **não aplicar**.
 
-A revisão (passo 6) também acontece quando o script roda com flags num terminal; só
-o `--no-interactive` (e a skill `/pullrequest`) aplica direto.
+**Preferências perguntadas uma vez.** Na primeira execução num terminal, o script
+pergunta se deve publicar sem revisar (`AUTO_PUBLISH_DESCRIPTION`) e se deve abrir o
+PR no navegador (`OPEN_PR_IN_BROWSER`); Enter aceita o padrão (sim). As respostas
+ficam no `~/.config/generate_pr/.env` e não são perguntadas de novo — para mudar,
+edite o valor lá. Elas valem também quando o script roda com flags num terminal. Com
+`--no-interactive` (e na skill `/pullrequest`) nada é perguntado: a descrição é
+publicada direto e o navegador não abre.
 
 ### Modo não-interativo (flags)
 
@@ -355,6 +362,8 @@ Como funciona:
 | `AI_PROVIDER` | `claude` | Provedor padrão: `claude` ou `gemini`. |
 | `CLAUDE_MODEL` | `opus` | Modelo Claude padrão: `sonnet`, `opus`, `haiku` ou um ID completo (ex.: `claude-opus-5-5`). |
 | `ANTHROPIC_API_KEY` | — | API key da Anthropic. Sem ela, o Claude roda pelo `claude` CLI. |
+| `AUTO_PUBLISH_DESCRIPTION` | `true` | Publica a descrição direto no PR. Com `false`, mostra para revisão antes (só num terminal). Perguntada uma vez se não estiver definida. |
+| `OPEN_PR_IN_BROWSER` | `true` | Abre o PR no navegador ao terminar (só num terminal, nunca com `--no-interactive`). Perguntada uma vez se não estiver definida. |
 | `GENERATE_PR_ENV_FILE` | — | Caminho de um `.env` alternativo. Quando definida, substitui o `.env` ao lado do script e o `~/.config/generate_pr/.env`. |
 
 ---
@@ -384,9 +393,10 @@ Como funciona:
    mantido. Sem terminal (CI) ou com `--no-interactive`, desiste direto. O resultado
    é salvo em cache.
 9. Ao atualizar um PR, os checkboxes que já estavam marcados continuam marcados.
-10. No terminal, mostra a descrição para **revisão** (aplicar, editar, gerar de novo
-    ou não aplicar).
-11. **Atualiza** o corpo do PR via `gh api PATCH` e mostra a URL do PR.
+10. Com `AUTO_PUBLISH_DESCRIPTION=false` (num terminal), mostra a descrição para
+    **revisão** (aplicar, editar, gerar de novo ou não aplicar).
+11. **Atualiza** o corpo do PR via `gh api PATCH`, mostra a URL e, num terminal,
+    abre o PR no navegador (`OPEN_PR_IN_BROWSER`).
 
 Se a etapa 8 falhar, o PR continua válido com o template — basta rodar de novo. O
 contexto extra fica salvo e é oferecido de volta na próxima execução interativa.
