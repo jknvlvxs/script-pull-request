@@ -339,8 +339,10 @@ Como funciona:
 | `--list-models` | — | Lista os modelos Gemini *flash* disponíveis (mais novo primeiro) e os apelidos do Claude, e sai. |
 | `-i`, `--interactive` | — | Força o modo interativo. |
 | `--no-interactive` | — | Força o modo não-interativo. |
+| `-h`, `--help` | — | Mostra todas as opções, com exemplos, e sai. Funciona mesmo sem as dependências instaladas. |
 
-> Qualquer flag desconhecida é ignorada silenciosamente.
+> Um argumento desconhecido (ex.: `--darft`) gera um aviso e é ignorado; o script
+> continua.
 
 ---
 

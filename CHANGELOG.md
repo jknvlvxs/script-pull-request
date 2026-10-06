@@ -30,6 +30,8 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 - Proteções no terminal: o script recusa rodar em `main`, `master`, `release` ou com
   HEAD destacado e avisa sobre alterações não commitadas.
 - A URL do PR aparece no fim, com a opção de abrir no navegador.
+- `-h`/`--help` lista todas as opções, com exemplos. Funciona mesmo sem as
+  dependências instaladas.
 - Skill `/pullrequest` para o Claude Code (`skills/pullrequest/SKILL.md`, instalada com
   um link simbólico em `~/.claude/skills/`). Roda o script com `--no-interactive`,
   faz as perguntas do modo interativo com a UI do Claude Code, propõe o contexto
@@ -68,6 +70,7 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   (porquê e impacto primeiro, agrupar por assunto, apontar riscos, pt-BR) vão como
   system prompt nos três caminhos (API do Gemini, API da Anthropic e `claude` CLI).
   Os checkboxes de classificação, como "Tipo de mudança", agora são marcados.
+- Argumentos desconhecidos geram um aviso em vez de serem ignorados em silêncio.
 - A chave do cache passa a ser o prompt completo (e as instruções), então mudanças
   no template ou nas regras geram uma descrição nova. Caches antigos não são
   reaproveitados.

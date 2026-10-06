@@ -21,6 +21,55 @@ API_BASE="https://generativelanguage.googleapis.com/v1beta"
 # Endpoint da Messages API da Anthropic (usada via curl quando há ANTHROPIC_API_KEY).
 ANTHROPIC_API_BASE="https://api.anthropic.com/v1"
 
+# Ajuda do comando. Texto puro: precisa funcionar antes da checagem de dependências.
+usage() {
+  local cmd
+  cmd="${0##*/}"
+  cat <<EOF
+Uso: $cmd [opções]
+
+Cria (ou atualiza) o Pull Request da branch atual e preenche a descrição com
+IA a partir do diff. Sem opções, num terminal, abre o modo interativo.
+
+Destino do PR:
+  --hotfix                    PR para main/master (padrão: release)
+  --base, --target <branch>   define a branch de destino
+  --edit                      só atualiza a descrição do PR aberto da branch
+  --draft                     cria o PR como rascunho
+
+Descrição:
+  --model <nome>              opus | sonnet | haiku | claude-* | gemini-*
+                              (padrão: opus, ou o que estiver no .env)
+  --provider <nome>           claude | gemini (normalmente deduzido do --model)
+  --context "<texto>"         contexto extra para o prompt (pode repetir)
+  --context-file <arquivo>    contexto extra lido de um arquivo
+  --diff [branch]             gera o diff contra outra branch (padrão:
+                              main/master; sem valor, a branch padrão do remoto)
+
+Execução:
+  -i, --interactive           força o modo interativo
+  --no-interactive            não pergunta nada e aplica a descrição direto (CI)
+  --verify                    roda os hooks de pre-push (pulados por padrão)
+  --list-models               lista os modelos disponíveis e sai
+  -h, --help                  mostra esta ajuda
+
+Exemplos:
+  $cmd                                modo interativo
+  $cmd --hotfix --draft               hotfix como rascunho
+  $cmd --edit --model sonnet          refaz a descrição do PR aberto
+  $cmd --context "Corrige o timeout"  acrescenta contexto ao prompt
+
+Configuração em ~/.config/generate_pr/.env (provedor, modelo e API keys).
+Documentação completa no README.md do repositório.
+EOF
+}
+
+for _arg in "$@"; do
+  case "$_arg" in
+    -h|--help) usage; exit 0 ;;
+  esac
+done
+
 # ─────────────────────────────────────────────────────────────
 # Dependências obrigatórias (falha cedo). Usa echo puro pois não
 # podemos depender do gum para reportar a ausência do gum.
@@ -624,6 +673,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
+      ui_log warn "Argumento desconhecido ignorado: $1 (veja ${0##*/} --help)"
       shift
       ;;
   esac
