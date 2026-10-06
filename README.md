@@ -23,8 +23,13 @@ Principais recursos:
   (navegação por setas, busca incremental, sem menus numéricos).
 - **Skill `/pullrequest` para o Claude Code** — roda o script de dentro de uma sessão,
   com as perguntas feitas pelo Claude e o contexto extra montado a partir da conversa.
-- **Detecção de ClickUp** pelo nome da branch, com link automático no template.
-- **Cache** por branch + modelo + contexto + diff.
+- **Detecção de ClickUp** pelo nome da branch (em qualquer posição), com link
+  automático no template.
+- **Revisão antes de aplicar** — no terminal, a descrição é mostrada para aplicar,
+  editar no seu editor ou gerar de novo.
+- **Edições preservadas** — ao atualizar um PR, os checkboxes já marcados (como o
+  checklist) continuam marcados, e o que o autor escreveu à mão vai para o prompt.
+- **Cache** por branch + modelo + prompt (diff, commits, contexto, template).
 
 > Histórico de mudanças: veja o [CHANGELOG.md](CHANGELOG.md).
 
@@ -244,6 +249,13 @@ Acionado automaticamente quando o script roda **sem flags** em um terminal
 5. **Contexto adicional** — `gum confirm` + editor multilinha `gum write`. Se uma
    execução anterior desta branch falhou, o contexto digitado nela é mostrado e o
    script oferece **usar**, **editar**, **escrever um novo** ou **descartar**.
+6. **Revisão da descrição** — depois de gerada, a descrição é mostrada formatada e o
+   script pergunta: **aplicar no PR**, **editar antes de aplicar** (abre o `$VISUAL`
+   ou `$EDITOR`; sem eles, o `vi`), **gerar de novo** (com a opção de ajustar o
+   contexto) ou **não aplicar**. No fim, oferece abrir o PR no navegador.
+
+A revisão (passo 6) também acontece quando o script roda com flags num terminal; só
+o `--no-interactive` (e a skill `/pullrequest`) aplica direto.
 
 ### Modo não-interativo (flags)
 
@@ -317,6 +329,7 @@ Como funciona:
 | `--hotfix` | — | PR direcionado para `main`/`master` em vez de `release`. |
 | `--base`, `--target` | branch | Define manualmente a branch de **destino** do PR (validada contra o remoto). |
 | `--draft` | — | Cria o PR como rascunho. |
+| `--verify` | — | Roda os hooks de pre-push no `git push`. Por padrão eles são pulados (`--no-verify`), porque alguns demoram e travam o push. |
 | `--edit` | — | Atualiza só a descrição do PR aberto da branch, qualquer que seja o destino dele (ignora `--hotfix`/`--base`). Erro se não houver PR aberto. |
 | `--diff [branch]` | branch (opcional) | Compara o diff com a branch informada; sem valor, usa `origin/HEAD`. |
 | `--model <nome>` | nome do modelo | Define o modelo. `gemini-*` usa o Gemini; `sonnet`, `opus`, `haiku` ou `claude-*` usam o Claude; outros nomes valem para o provedor atual. |
@@ -348,20 +361,32 @@ Como funciona:
 
 1. Carrega `.env` e resolve a API key.
 2. `git fetch origin` e determina a branch padrão (`main`/`master`).
-3. (Interativo) coleta tipo, draft, branch de comparação, modelo e contexto.
-4. Gera o `git diff` (ignorando lockfiles, builds, binários e imagens).
-5. Lê `.github/pull_request_template.md` (ou usa um **template padrão embutido** se o
-   arquivo não existir) e injeta o link do ClickUp (se a branch tiver um ID no formato
-   `feat/868gfh2k9`).
-6. **Cria o PR** (ou detecta um existente) já com o template — com `--assignee @me`.
-7. Gera a **descrição com IA** com o provedor escolhido. Gemini: API REST, ou `gemini`
-   CLI sem key. Claude: Messages API, ou `claude` CLI sem key. Após **2 falhas
-   seguidas** no mesmo modelo, pergunta (via `gum choose`) se quer **trocar de modelo**,
-   tentar de novo ou desistir — o contexto extra já digitado é mantido. Sem terminal
-   (CI) ou com `--no-interactive`, desiste direto. O resultado é salvo em cache.
-8. **Atualiza** o corpo do PR via `gh api PATCH`.
+3. Recusa rodar em `main`, `master`, `release` ou com HEAD destacado, e avisa se há
+   alterações não commitadas (no terminal, pergunta se deve continuar).
+4. (Interativo) coleta tipo, draft, branch de comparação, modelo e contexto.
+5. Gera o `git diff` (ignorando lockfiles, builds, binários e imagens), o resumo dos
+   arquivos alterados (`--stat`) e as mensagens dos commits da branch.
+6. Lê `.github/pull_request_template.md` (ou usa um **template padrão embutido** se o
+   arquivo não existir) e injeta o link do ClickUp. O ID é um trecho de 9 caracteres
+   alfanuméricos (com pelo menos um dígito) em qualquer posição do nome da branch:
+   `feat/868gfh2k9`, `dhr-feat/novaatualizacao-868kut8jj`, `fix/CU-868kut8jj`.
+7. Faz o push e **cria o PR** (ou detecta um existente) já com o template — com
+   `--assignee @me`.
+8. Gera a **descrição com IA** com o provedor escolhido. O prompt traz commits,
+   arquivos alterados, diff, contexto do autor e, ao atualizar um PR, a descrição
+   atual — cada parte numa tag (`<diff>`, `<commits>`…) — e as regras do template no
+   fim; o papel e os critérios de uma boa descrição vão como system prompt. Gemini:
+   API REST, ou `gemini` CLI sem key. Claude: Messages API, ou `claude` CLI sem key.
+   Após **2 falhas seguidas** no mesmo modelo, pergunta (via `gum choose`) se quer
+   **trocar de modelo**, tentar de novo ou desistir — o contexto extra já digitado é
+   mantido. Sem terminal (CI) ou com `--no-interactive`, desiste direto. O resultado
+   é salvo em cache.
+9. Ao atualizar um PR, os checkboxes que já estavam marcados continuam marcados.
+10. No terminal, mostra a descrição para **revisão** (aplicar, editar, gerar de novo
+    ou não aplicar).
+11. **Atualiza** o corpo do PR via `gh api PATCH` e mostra a URL do PR.
 
-Se a etapa 7 falhar, o PR continua válido com o template — basta rodar de novo. O
+Se a etapa 8 falhar, o PR continua válido com o template — basta rodar de novo. O
 contexto extra fica salvo e é oferecido de volta na próxima execução interativa.
 
 ---
@@ -369,8 +394,10 @@ contexto extra fica salvo e é oferecido de volta na próxima execução interat
 ## Cache
 
 As descrições geradas ficam em `~/.cache/generate_pr/`, com chave derivada de
-**branch + provedor/modelo + contexto + diff**. Mudar qualquer um desses regenera a descrição;
+**branch + provedor/modelo + prompt completo** (instruções, diff, commits, contexto,
+template e descrição atual do PR). Mudar qualquer um desses regenera a descrição;
 caso contrário, o conteúdo em cache é reutilizado (evita chamadas repetidas à IA).
+"Gerar de novo", na revisão, ignora o cache.
 
 O contexto extra também fica salvo ali, em
 `~/.cache/generate_pr/context/<repositório>/<branch>.md` (com `/` da branch trocado

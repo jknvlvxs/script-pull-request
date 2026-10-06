@@ -4,6 +4,7 @@ set -e
 
 HOTFIX=false
 DRAFT=false
+VERIFY_HOOKS=false
 EDIT_FLAG=false
 DIFF=false
 DIFF_BRANCH=""
@@ -82,6 +83,12 @@ ui_spin_capture() {
     ui_log info "$title"
     "$@"
   fi
+}
+
+# Dá para abrir prompts? Exige terminal e respeita --no-interactive (CI/automação).
+# Vale também quando o script foi chamado com flags num terminal.
+can_prompt() {
+  [ -t 0 ] && [ "$NO_INTERACTIVE" != true ]
 }
 
 # Encerra o script quando o usuário cancela um prompt do gum (Ctrl+C / Esc).
@@ -245,6 +252,26 @@ edit_context() {
     --value "${1:-}"
 }
 
+# ID da tarefa no ClickUp a partir do nome da branch: um trecho de 9 caracteres
+# alfanuméricos, com pelo menos um dígito, entre separadores (/ - _ .). Funciona em
+# qualquer posição: feat/868gfh2k9, dhr-feat/novaatualizacao-868kut8jj, CU-868kut8jj.
+# Com mais de um candidato, prefere o que começa com 86 (padrão dos IDs atuais).
+detect_clickup_id() {
+  local token first=""
+  local -a tokens
+  IFS='/._-' read -r -a tokens <<< "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  for token in "${tokens[@]}"; do
+    case "$token" in *[0-9]*) ;; *) continue ;; esac
+    [[ "$token" =~ ^[0-9a-z]{9}$ ]] || continue
+    if [[ "$token" == 86* ]]; then
+      printf '%s' "$token"
+      return 0
+    fi
+    [ -z "$first" ] && first="$token"
+  done
+  printf '%s' "$first"
+}
+
 # Lista as branches remotas (sem o HEAD), uma por linha.
 remote_branches() {
   git branch -r --format='%(refname:short)' \
@@ -273,6 +300,24 @@ DEFAULT_TEMPLATE='## 📋 Descrição
 
 <!-- Passos para validar manualmente as mudanças. -->'
 
+# Papel e critérios de qualidade, enviados como system prompt nos três caminhos
+# (API do Gemini, API da Anthropic e claude CLI). As regras de formato do template
+# ficam no fim do prompt (build_prompt).
+SYSTEM_PROMPT='Você escreve descrições de Pull Request para uma equipe de desenvolvimento. Quem lê é a pessoa que vai revisar o PR: ela precisa entender rápido o que mudou, por que mudou e onde prestar atenção.
+
+Como escrever:
+- Comece pelo porquê e pelo impacto (o problema resolvido ou o comportamento novo); depois, o que foi feito.
+- Agrupe as mudanças por assunto. Não narre arquivo por arquivo nem repita o diff.
+- Aponte o que pede atenção na revisão: riscos, mudanças de contrato ou de API, migrações, variáveis de ambiente ou configurações novas, dependências adicionadas.
+- Seja conciso e específico. Prefira tópicos curtos a parágrafos longos e evite frases genéricas como "melhora a qualidade do código".
+- Escreva em português do Brasil. Nomes de arquivos, funções, variáveis e comandos vão entre crases.
+
+Fontes:
+- Use só o diff, as mensagens de commit, o contexto do autor e a descrição atual do PR (quando houver). O contexto do autor é autoritativo e prevalece sobre o que você deduzir do diff.
+- Não invente motivações, números, tarefas ou passos que essas fontes não sustentem. Se o porquê não estiver claro, descreva o que mudou sem especular.
+
+Responda somente com o Markdown do template preenchido, sem texto antes ou depois e sem cercas de código em volta.'
+
 # Lista apenas os modelos Gemini *flash* de texto que suportam generateContent, do
 # mais novo para o mais antigo. Fica de fora: pro, lite, image, tts, audio, etc.
 # pageSize=1000: sem ele a API devolve só 50 modelos (paginado) e alguns sumiam.
@@ -300,8 +345,8 @@ generate_via_gemini_api() {
   printf '%s' "$prompt" > "$prompt_file"
 
   # Monta o JSON lendo o prompt do arquivo (não passa pela linha de comando).
-  if ! jq -n --rawfile t "$prompt_file" \
-    '{contents:[{parts:[{text:$t}]}]}' > "$payload_file"; then
+  if ! jq -n --rawfile t "$prompt_file" --arg s "$SYSTEM_PROMPT" \
+    '{systemInstruction:{parts:[{text:$s}]}, contents:[{role:"user", parts:[{text:$t}]}]}' > "$payload_file"; then
     ui_log error "Falha ao montar o payload JSON."
     return 1
   fi
@@ -350,8 +395,8 @@ generate_via_claude_api() {
       ;;
   esac
 
-  if ! jq -n --rawfile t "$prompt_file" --arg m "$model" --argjson fb "$fallback" \
-    '{model:$m, max_tokens:16000, messages:[{role:"user", content:$t}]}
+  if ! jq -n --rawfile t "$prompt_file" --arg m "$model" --arg s "$SYSTEM_PROMPT" --argjson fb "$fallback" \
+    '{model:$m, max_tokens:16000, system:$s, messages:[{role:"user", content:$t}]}
      + (if $fb then {fallbacks:"default"} else {} end)' > "$payload_file"; then
     ui_log error "Falha ao montar o payload JSON."
     return 1
@@ -389,7 +434,7 @@ generate_via_claude_api() {
 }
 
 # Gera conteúdo pelo claude CLI (Claude Code) em modo não interativo, usando a conta já
-# logada. Sem ferramentas e com system prompt próprio: o modelo só devolve o texto.
+# logada. Sem ferramentas e com o SYSTEM_PROMPT: o modelo só devolve o texto.
 generate_via_claude_cli() {
   local prompt="$1" model="$2" out rc=0
 
@@ -398,7 +443,7 @@ generate_via_claude_cli() {
     --tools "" \
     --no-session-persistence \
     --output-format text \
-    --system-prompt "Você preenche templates de Pull Request a partir de um git diff. Responda somente com o Markdown pedido, sem comentários antes ou depois." \
+    --system-prompt "$SYSTEM_PROMPT" \
     2>/dev/null) || rc=$?
 
   if [ "$rc" -ne 0 ]; then
@@ -504,6 +549,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --draft)
       DRAFT=true
+      shift
+      ;;
+    --verify)
+      VERIFY_HOOKS=true
       shift
       ;;
     --edit)
@@ -637,6 +686,30 @@ else
 fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+# O PR sai de uma branch de trabalho: nunca de main/master/release nem de HEAD destacado.
+case "$CURRENT_BRANCH" in
+  HEAD)
+    ui_log error "HEAD destacado: faça checkout da branch de trabalho antes de abrir o PR."
+    exit 1
+    ;;
+  main|master|release)
+    ui_log error "Você está na branch '$CURRENT_BRANCH'. O PR precisa sair de uma branch de trabalho."
+    exit 1
+    ;;
+esac
+
+# Alterações não commitadas não vão para o PR (o script só envia commits).
+_dirty=$(git status --porcelain)
+if [ -n "$_dirty" ]; then
+  ui_log warn "Há alterações não commitadas. Elas NÃO entram no PR:"
+  printf '%s\n' "$_dirty" | head -n 10 | sed 's/^/    /'
+  [ "$(printf '%s\n' "$_dirty" | wc -l)" -gt 10 ] && echo "    …"
+  if can_prompt && ! ui_confirm "Continuar mesmo assim?"; then
+    ui_log info "Faça o commit das alterações e rode de novo."
+    exit 0
+  fi
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Detecta cedo se já existe um PR aberto desta branch (número + base).
@@ -814,29 +887,39 @@ ui_log info "🌿 Branch atual: $CURRENT_BRANCH"
 
 ui_log info "🔍 Gerando diff para $DIFF_BRANCH..."
 
-GIT_DIFF=$(git diff "origin/$DIFF_BRANCH...HEAD" -- . \
-  ':(exclude)*package-lock.json' \
-  ':(exclude)*yarn.lock' \
-  ':(exclude)dist/' \
-  ':(exclude)build/' \
-  ':(exclude)node_modules/' \
-  ':(exclude)vendor/' \
-  ':(exclude)*.min.js' \
-  ':(exclude)*.min.css' \
-  ':(exclude)*.map' \
-  ':(exclude)*.png' \
-  ':(exclude)*.jpg' \
-  ':(exclude)*.jpeg' \
-  ':(exclude)*.gif' \
-  ':(exclude)*.svg' \
-  ':(exclude)*.pdf' \
-  ':(exclude)*.sqlite' \
-  ':(exclude)*.db')
+DIFF_EXCLUDES=(
+  ':(exclude)*package-lock.json'
+  ':(exclude)*yarn.lock'
+  ':(exclude)dist/'
+  ':(exclude)build/'
+  ':(exclude)node_modules/'
+  ':(exclude)vendor/'
+  ':(exclude)*.min.js'
+  ':(exclude)*.min.css'
+  ':(exclude)*.map'
+  ':(exclude)*.png'
+  ':(exclude)*.jpg'
+  ':(exclude)*.jpeg'
+  ':(exclude)*.gif'
+  ':(exclude)*.svg'
+  ':(exclude)*.pdf'
+  ':(exclude)*.sqlite'
+  ':(exclude)*.db'
+)
+GIT_DIFF=$(git diff "origin/$DIFF_BRANCH...HEAD" -- . "${DIFF_EXCLUDES[@]}")
 
 if [ -z "$GIT_DIFF" ]; then
   ui_log warn "Nenhum diff relevante encontrado."
   exit 0
 fi
+
+# Visão geral dos arquivos e mensagens de commit: ajudam o modelo a entender o escopo
+# e o porquê, que o diff sozinho não mostra. Trailers (Co-Authored-By etc.) são ruído.
+GIT_STAT=$(git diff --stat=200 "origin/$DIFF_BRANCH...HEAD" -- . "${DIFF_EXCLUDES[@]}")
+GIT_COMMITS=$(git log --no-merges --reverse -n 50 --format='* %s%n%w(0,2,2)%b' \
+  "origin/$DIFF_BRANCH..HEAD" \
+  | grep -viE '^[[:space:]]*(co-authored-by|signed-off-by):' \
+  | sed '/^[[:space:]]*$/d' || true)
 
 # Template (usa o do repositório; se não existir, cai no template padrão embutido)
 if [ -f ".github/pull_request_template.md" ]; then
@@ -846,8 +929,7 @@ else
   TEMPLATE_PR="$DEFAULT_TEMPLATE"
 fi
 
-# Extrai ID do ClickUp (ex: feat/868gfh2k9)
-CLICKUP_ID=$(echo "$CURRENT_BRANCH" | grep -oE '(feat|fix|chore|docs|style|refactor|perf|test|build|ci|hotfix|wip|impr|lint)/([0-9a-z]{9})' | cut -d'/' -f2 || true)
+CLICKUP_ID=$(detect_clickup_id "$CURRENT_BRANCH")
 
 if [ -n "$CLICKUP_ID" ]; then
   CLICKUP_LINK="[Link para a tarefa no ClickUp #$CLICKUP_ID](https://app.clickup.com/t/$CLICKUP_ID)"
@@ -862,17 +944,26 @@ fi
 # 1º) Cria/garante o PR ANTES de gerar a descrição com IA.
 #     O corpo inicial é o próprio template; a IA só atualiza depois.
 # ─────────────────────────────────────────────────────────────
-ui_spin "Garantindo que a branch está no remoto..." \
-  git push -u --no-verify origin "$CURRENT_BRANCH"
+# Por padrão os hooks de pre-push são pulados (alguns demoram e travam o push).
+# Com --verify eles rodam, sem spinner, para que a saída deles fique visível.
+if [ "$VERIFY_HOOKS" = true ]; then
+  ui_log info "Enviando a branch para o remoto (com os hooks de pre-push)..."
+  git push -u origin "$CURRENT_BRANCH"
+else
+  ui_spin "Garantindo que a branch está no remoto..." \
+    git push -u --no-verify origin "$CURRENT_BRANCH"
+fi
 
 ui_log info "🔎 Verificando se já existe PR..."
 
 PR_TITLE="$(ucfirst "$CURRENT_BRANCH")"
 PR_NUMBER=$(gh pr list --head "$CURRENT_BRANCH" --base "$TARGET_BRANCH" --state open --json number --jq '.[0].number')
 
+PR_CREATED=false
 if [ -n "$PR_NUMBER" ]; then
   ui_log info "✅ PR já existe (#$PR_NUMBER)."
 else
+  PR_CREATED=true
   ui_log info "🆕 Criando novo PR com o template (a descrição será preenchida em seguida)..."
 
   TEMPLATE_FILE=$(mktemp)
@@ -914,18 +1005,12 @@ generate_once() {
   elif [ -n "$GEMINI_API_KEY_RESOLVED" ]; then
     generate_via_gemini_api "$prompt" "$GEMINI_API_KEY_RESOLVED" "$GEMINI_MODEL"
   else
-    printf '%s' "$prompt" | node --max-old-space-size=8192 "$(which gemini)" -m "$GEMINI_MODEL" 2>/dev/null
+    printf '%s\n\n%s' "$SYSTEM_PROMPT" "$prompt" | node --max-old-space-size=8192 "$(which gemini)" -m "$GEMINI_MODEL" 2>/dev/null
   fi
 }
 
 # Falhas seguidas no mesmo modelo antes de oferecer a troca.
 MAX_ATTEMPTS_PER_MODEL=2
-
-# Dá para abrir prompts? Exige terminal e respeita --no-interactive (CI/automação).
-# Vale também quando o script foi chamado com flags num terminal.
-can_prompt() {
-  [ -t 0 ] && [ "$NO_INTERACTIVE" != true ]
-}
 
 # Gera a descrição e a guarda em PR_BODY (sem subshell, para que uma troca de modelo
 # feita aqui valha para o resto do script). Após MAX_ATTEMPTS_PER_MODEL falhas seguidas
@@ -969,77 +1054,169 @@ generate_pr_body() {
   done
 }
 
-# Bloco de contexto adicional (só entra no prompt se houver conteúdo)
-CONTEXT_BLOCK=""
-if [ -n "$EXTRA_CONTEXT" ]; then
-  CONTEXT_BLOCK="
----
-CONTEXTO ADICIONAL DO AUTOR (informação autoritativa; use para complementar o diff):
-$EXTRA_CONTEXT
-"
+# Descrição que o PR já tem (PR reaproveitado ou --edit). Vai para o prompt, para o
+# modelo manter o que o autor acrescentou à mão, e serve de base para preservar os
+# checkboxes marcados. O template puro não conta como descrição.
+CURRENT_BODY=""
+if [ "$PR_CREATED" != true ]; then
+  CURRENT_BODY=$(gh pr view "$PR_NUMBER" --json body --jq .body | tr -d '\r')
+  if [ "$CURRENT_BODY" = "$TEMPLATE_PR" ]; then
+    CURRENT_BODY=""
+  fi
 fi
+
+# Monta o prompt: primeiro os dados, cada um na sua tag (o diff tem linhas "---", que
+# confundiriam separadores), e as instruções no fim. Papel e critérios de qualidade
+# ficam no SYSTEM_PROMPT.
+build_prompt() {
+  printf '<commits>\n%s\n</commits>\n\n' "${GIT_COMMITS:-(sem mensagens de commit)}"
+  printf '<arquivos_alterados>\n%s\n</arquivos_alterados>\n\n' "$GIT_STAT"
+  printf '<diff>\n%s\n</diff>\n\n' "$GIT_DIFF"
+  if [ -n "$EXTRA_CONTEXT" ]; then
+    printf '<contexto_do_autor>\n%s\n</contexto_do_autor>\n\n' "$EXTRA_CONTEXT"
+  fi
+  if [ -n "$CURRENT_BODY" ]; then
+    printf '<descricao_atual>\n%s\n</descricao_atual>\n\n' "$CURRENT_BODY"
+  fi
+  printf '<template>\n%s\n</template>\n\n' "$TEMPLATE_PR"
+  cat <<'EOF'
+Preencha o <template> com a descrição deste Pull Request:
+
+1. Mantenha todos os títulos, seções e subtópicos do template, na mesma ordem e com o mesmo texto, mesmo que alguma seção fique vazia.
+2. Em listas de checkbox que classificam a mudança (como "Tipo de mudança"), marque com [x] as opções que o diff confirma e deixe as outras desmarcadas.
+3. Não preencha a seção "## 📌 Checklist de Qualidade": ela é do autor. Copie-a exatamente como está no template.
+4. Nos passos de teste, sugira validações manuais que decorram do diff e do contexto do autor.
+EOF
+  if [ -n "$CURRENT_BODY" ]; then
+    cat <<'EOF'
+5. A <descricao_atual> é a que o PR tem hoje e pode estar desatualizada. Reescreva a partir do diff, mas mantenha o que o autor acrescentou à mão e o diff não mostra, como imagens, links, observações e passos de teste específicos.
+EOF
+  fi
+}
 
 mkdir -p "$CACHE_DIR"
 # sha256sum (Linux) ou shasum (macOS).
 sha256() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi
 }
-# Arquivo de cache para o provedor/modelo atual (recalculado se o modelo for trocado).
+# Arquivo de cache para o provedor/modelo e o prompt atuais. O prompt inclui diff,
+# commits, contexto, template e descrição atual, então qualquer mudança neles (ou nas
+# instruções) gera uma descrição nova.
 cache_file() {
   printf '%s/%s' "$CACHE_DIR" \
-    "$(printf '%s\n%s\n%s\n%s' "$CURRENT_BRANCH" "$AI_PROVIDER:$(ai_model)" "$EXTRA_CONTEXT" "$GIT_DIFF" \
+    "$(printf '%s\n%s\n%s\n%s' "$CURRENT_BRANCH" "$AI_PROVIDER:$(ai_model)" "$SYSTEM_PROMPT" "$PROMPT" \
       | sha256 | cut -d' ' -f1)"
 }
-CACHE_FILE=$(cache_file)
 
-PR_BODY=""
+# Mantém marcados ([x]) os checkboxes que já estavam marcados na descrição atual (ex.: o
+# checklist preenchido pelo autor) quando o mesmo item volta desmarcado na nova.
+keep_checked_items() {
+  local current_file new_file
+  current_file=$(mktemp)
+  new_file=$(mktemp)
+  printf '%s\n' "$1" > "$current_file"
+  printf '%s\n' "$2" > "$new_file"
+  awk '
+    { sub(/\r$/, "") }
+    NR == FNR {
+      if (match($0, /^[ \t]*[-*] \[[xX]\] /)) checked[substr($0, RLENGTH + 1)] = 1
+      next
+    }
+    match($0, /^[ \t]*[-*] \[ \] /) && (substr($0, RLENGTH + 1) in checked) {
+      $0 = substr($0, 1, RLENGTH - 3) "x] " substr($0, RLENGTH + 1)
+    }
+    { print }
+  ' "$current_file" "$new_file"
+  rm -f "$current_file" "$new_file"
+}
 
-if [ -f "$CACHE_FILE" ]; then
-  ui_log info "💾 Usando conteúdo do PR em cache (diff/contexto/modelo não mudaram)..."
-  PR_BODY=$(cat "$CACHE_FILE")
-else
-  PROMPT=$(cat <<EOF
-Você é um assistente de desenvolvimento sênior. Sua tarefa é preencher o template de Pull Request (PR) com base no git diff fornecido.
-
-Regras obrigatórias:
-1. Baseie-se no git diff fornecido. Quando houver "CONTEXTO ADICIONAL DO AUTOR", use-o como informação autoritativa complementar. Não invente informações além dessas fontes.
-2. Retorne em formato Markdown contendo a ficha completa.
-3. Não preencha a seção "## 📌 Checklist de Qualidade".
-4. Mantenha todas as seções, subtópicos e checkboxes exatamente como estão, mesmo que vazios.
-5. Não remova, renomeie ou reestruture títulos.
-6. Sugira testes manuais apenas com base no diff e no contexto adicional.
-7. Não adicione nenhum texto fora da ficha.
-
----
-TEMPLATE:
-$TEMPLATE_PR
-$CONTEXT_BLOCK
----
-DIFF:
-$GIT_DIFF
-
----
-RESULTADO:
-EOF
-)
-
-  if generate_pr_body "$PROMPT"; then
+# Obtém a descrição para o prompt atual (do cache ou gerando) e a guarda em PR_BODY.
+# Uso: obtain_body [true = ignora o cache]. Em caso de falha, PR_BODY não muda.
+obtain_body() {
+  local skip_cache="${1:-false}" cache
+  PROMPT=$(build_prompt)
+  cache=$(cache_file)
+  if [ "$skip_cache" != true ] && [ -f "$cache" ]; then
+    ui_log info "💾 Usando a descrição em cache (prompt e modelo não mudaram)..."
+    PR_BODY=$(cat "$cache")
+  else
+    generate_pr_body "$PROMPT" || return 1
     # O modelo pode ter sido trocado durante a geração: salva na chave do modelo final.
     printf '%s' "$PR_BODY" > "$(cache_file)"
+  fi
+  if [ -n "$CURRENT_BODY" ]; then
+    PR_BODY=$(keep_checked_items "$CURRENT_BODY" "$PR_BODY")
+  fi
+}
+
+# Abre a descrição no editor do usuário ($VISUAL, $EDITOR ou vi).
+edit_body() {
+  local dir file
+  dir=$(mktemp -d)
+  file="$dir/descricao-pr.md"
+  printf '%s\n' "$PR_BODY" > "$file"
+  if ${VISUAL:-${EDITOR:-vi}} "$file" < /dev/tty > /dev/tty; then
+    PR_BODY=$(cat "$file")
   else
-    ui_log error "Não foi possível gerar a descrição com a IA."
-    ui_log info "O PR #$PR_NUMBER já foi criado com o template. Rode o script novamente mais tarde para preencher a descrição."
-    if [ -n "$EXTRA_CONTEXT" ]; then
-      ui_log info "💾 Contexto extra salvo em $(context_file) — será oferecido na próxima execução interativa."
-    fi
-    PR_BODY=""
+    ui_log warn "O editor terminou com erro; mantendo a versão anterior."
+  fi
+  rm -rf "$dir"
+}
+
+# Mostra a descrição e pergunta o que fazer. Retorna 0 para aplicar e 1 para não
+# aplicar. Esc/Ctrl+C encerra sem mexer no PR (o contexto extra continua salvo).
+review_body() {
+  local action
+  while true; do
+    printf '%s\n' "$PR_BODY" | gum format
+    action=$(gum choose \
+      "Aplicar no PR #$PR_NUMBER" \
+      "Editar antes de aplicar" \
+      "Gerar de novo" \
+      "Não aplicar (o PR fica como está)" \
+      --header "Descrição gerada ($(ai_model_label))") || _abort_cancel
+    case "$action" in
+      Aplicar*) return 0 ;;
+      Editar*)  edit_body ;;
+      Gerar*)
+        if ui_confirm "Ajustar o contexto extra antes de gerar de novo?" --default=false; then
+          EXTRA_CONTEXT=$(edit_context "$EXTRA_CONTEXT") || _abort_cancel
+          if [ -n "$EXTRA_CONTEXT" ]; then
+            save_context
+          fi
+        fi
+        obtain_body true || ui_log warn "Não foi possível gerar de novo; mantendo a versão anterior."
+        ;;
+      *) return 1 ;;
+    esac
+  done
+}
+
+PR_BODY=""
+if ! obtain_body; then
+  ui_log error "Não foi possível gerar a descrição com a IA."
+  ui_log info "O PR #$PR_NUMBER já foi criado com o template. Rode o script novamente mais tarde para preencher a descrição."
+  if [ -n "$EXTRA_CONTEXT" ]; then
+    ui_log info "💾 Contexto extra salvo em $(context_file) — será oferecido na próxima execução interativa."
+  fi
+fi
+
+# Com alguém no terminal, a descrição passa por revisão antes de ir para o PR.
+APPLY_BODY=false
+if [ -n "$PR_BODY" ]; then
+  if ! can_prompt; then
+    APPLY_BODY=true
+  elif review_body; then
+    APPLY_BODY=true
+  else
+    ui_log info "Descrição não aplicada; o PR #$PR_NUMBER ficou como estava."
   fi
 fi
 
 # ─────────────────────────────────────────────────────────────
-# 3º) Atualiza o corpo do PR com a descrição gerada (se houver)
+# 3º) Atualiza o corpo do PR com a descrição gerada (se aprovada)
 # ─────────────────────────────────────────────────────────────
-if [ -n "$PR_BODY" ]; then
+if [ "$APPLY_BODY" = true ]; then
   ui_log info "✏️ Atualizando a descrição do PR #$PR_NUMBER..."
 
   TEMP_BODY_FILE=$(mktemp)
@@ -1061,4 +1238,11 @@ fi
 # Garante o assignee (caso o PR já existisse)
 gh pr edit "$PR_NUMBER" --add-assignee @me > /dev/null 2>&1 || true
 
+PR_URL=$(gh pr view "$PR_NUMBER" --json url --jq .url 2>/dev/null || true)
 ui_success "PR #$PR_NUMBER pronto!"
+if [ -n "$PR_URL" ]; then
+  ui_log info "🔗 $PR_URL"
+  if can_prompt && ui_confirm "Abrir o PR no navegador?" --default=false; then
+    gh pr view "$PR_NUMBER" --web > /dev/null 2>&1 || ui_log warn "Não foi possível abrir o navegador."
+  fi
+fi

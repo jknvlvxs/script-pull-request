@@ -19,6 +19,17 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   rodado de novo; `--uninstall` remove o comando e a skill.
 - Configuração em `~/.config/generate_pr/.env`, lida depois do `.env` ao lado do script.
 - Passo a passo de instalação no README (rápida e manual).
+- Revisão da descrição antes de aplicar (no terminal): aplicar, editar no `$VISUAL`/
+  `$EDITOR`, gerar de novo (com a opção de ajustar o contexto) ou não aplicar.
+- Ao atualizar um PR (`--edit` ou PR reaproveitado), a descrição atual vai para o
+  prompt, para o modelo manter o que o autor escreveu à mão, e os checkboxes já
+  marcados (como o checklist) continuam marcados.
+- O prompt inclui as mensagens dos commits da branch (sem trailers como
+  `Co-Authored-By`) e o resumo dos arquivos alterados (`git diff --stat`).
+- Flag `--verify` para rodar os hooks de pre-push (continuam pulados por padrão).
+- Proteções no terminal: o script recusa rodar em `main`, `master`, `release` ou com
+  HEAD destacado e avisa sobre alterações não commitadas.
+- A URL do PR aparece no fim, com a opção de abrir no navegador.
 - Skill `/pullrequest` para o Claude Code (`skills/pullrequest/SKILL.md`, instalada com
   um link simbólico em `~/.claude/skills/`). Roda o script com `--no-interactive`,
   faz as perguntas do modo interativo com a UI do Claude Code, propõe o contexto
@@ -52,6 +63,14 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ### Alterado
 
+- Prompt reorganizado: dados primeiro, cada um numa tag (`<commits>`, `<diff>`,
+  `<template>`…), e as regras no fim. O papel e critérios de uma boa descrição
+  (porquê e impacto primeiro, agrupar por assunto, apontar riscos, pt-BR) vão como
+  system prompt nos três caminhos (API do Gemini, API da Anthropic e `claude` CLI).
+  Os checkboxes de classificação, como "Tipo de mudança", agora são marcados.
+- A chave do cache passa a ser o prompt completo (e as instruções), então mudanças
+  no template ou nas regras geram uma descrição nova. Caches antigos não são
+  reaproveitados.
 - A skill `/pullrequest` chama o comando `generate_pr` em vez do caminho fixo
   `~/scripts/generate_pr.sh`, então funciona com o repositório clonado em qualquer
   pasta.
@@ -76,6 +95,11 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ### Corrigido
 
+- Detecção do ID do ClickUp: só funcionava logo depois de `feat/`, `fix/` etc. e, em
+  nomes como `dhr-feat/novaatualizacao-868kut8jj`, pegava os 9 primeiros caracteres
+  depois da barra (`novaatual`). Agora o ID é um trecho de 9 caracteres alfanuméricos,
+  com pelo menos um dígito, em qualquer posição do nome (com preferência para os que
+  começam com `86`).
 - No modo não interativo, rodar de novo numa branch que já tem PR aberto para o mesmo
   destino terminava com erro ("Já existe PR"), embora o README diga que o PR é
   reutilizado. Agora o PR existente é reutilizado e só a descrição é atualizada; o

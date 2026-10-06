@@ -1,7 +1,7 @@
 ---
 name: pullrequest
 description: Cria ou atualiza o Pull Request da branch atual com o generate_pr — push, PR com o template, descrição gerada por IA (Gemini ou Claude) a partir do diff e link do ClickUp. Use quando o usuário digitar /pullrequest.
-argument-hint: "[hotfix | base <branch>] [draft] [edit] [sonnet | opus | haiku | gemini-…] [contexto livre]"
+argument-hint: "[hotfix | base <branch>] [draft] [edit] [hooks] [sonnet | opus | haiku | gemini-…] [contexto livre]"
 disable-model-invocation: true
 allowed-tools:
   - Bash(generate_pr *)
@@ -55,6 +55,7 @@ Interprete `$ARGUMENTS` (ordem livre, maiúsculas indiferentes):
 | `base <branch>` / `para <branch>` | `--base <branch>` |
 | `diff <branch>` | `--diff <branch>` (branch de comparação do diff) |
 | `draft` / `rascunho` | `--draft` |
+| `hooks` / `verify` | `--verify` (roda os hooks de pre-push, pulados por padrão) |
 | `edit` / `editar` / `atualizar` | `--edit` (só regenera a descrição do PR aberto) |
 | `sonnet`, `opus`, `haiku`, `claude-*`, `gemini-*` | `--model <nome>` |
 | qualquer outro texto | vira contexto extra (passo 3) |
