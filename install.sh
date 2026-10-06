@@ -150,7 +150,7 @@ if [ ${#missing[@]} -gt 0 ]; then
     if [ "$(uname -s)" = Darwin ]; then
       echo "  No macOS, instale o Homebrew (https://brew.sh) e rode este instalador de novo."
     else
-      echo "  Veja a seção \"Instalação manual\" do README.md."
+      echo "  Veja a seção \"Instalação manual\" do INSTALLATION.md."
     fi
     exit 1
   fi

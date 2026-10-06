@@ -12,6 +12,26 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ### Adicionado
 
+- `INSTALLATION.md` com o guia de instalação: requisitos, instalação rápida e manual,
+  conferência com `generate_pr --help`, o que o instalador faz (inclusive
+  `GENERATE_PR_BIN_DIR`), configuração dos provedores, todas as variáveis, como
+  atualizar e desinstalar e problemas comuns na instalação.
+
+### Alterado
+
+- O README fica só com o uso (modo interativo, flags, skill, fluxo, cache e problemas
+  no uso) e aponta para o `INSTALLATION.md`. As mensagens de dependência ausente do
+  script e do instalador também apontam para ele.
+
+### Corrigido
+
+- A solução de problemas citava a mensagem `Nenhuma API key encontrada`, que o script
+  não mostra mais; agora cita `Gemini indisponível`.
+
+## 2026-10-06
+
+### Adicionado
+
 - Instalador `install.sh` para compartilhar o script com outras pessoas: confere e
   instala as dependências (`brew` ou `apt`), verifica os logins do `gh` e do Claude
   Code, cria `~/.config/generate_pr/.env`, o comando `generate_pr` em `~/.local/bin` e
