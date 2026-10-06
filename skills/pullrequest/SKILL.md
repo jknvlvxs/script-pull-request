@@ -1,10 +1,10 @@
 ---
 name: pullrequest
-description: Cria ou atualiza o Pull Request da branch atual com o ~/scripts/generate_pr.sh — push, PR com o template, descrição gerada por IA (Gemini ou Claude) a partir do diff e link do ClickUp. Use quando o usuário digitar /pullrequest.
+description: Cria ou atualiza o Pull Request da branch atual com o generate_pr — push, PR com o template, descrição gerada por IA (Gemini ou Claude) a partir do diff e link do ClickUp. Use quando o usuário digitar /pullrequest.
 argument-hint: "[hotfix | base <branch>] [draft] [edit] [sonnet | opus | haiku | gemini-…] [contexto livre]"
 disable-model-invocation: true
 allowed-tools:
-  - Bash(~/scripts/generate_pr.sh *)
+  - Bash(generate_pr *)
   - Bash(git branch *)
   - Bash(git status *)
   - Bash(git rev-parse *)
@@ -16,7 +16,8 @@ allowed-tools:
 
 # /pullrequest
 
-Wrapper do `~/scripts/generate_pr.sh` para o Claude Code. Aqui não há terminal para o
+Wrapper do comando `generate_pr` (instalado pelo `install.sh` do repositório
+script-pull-request) para o Claude Code. Aqui não há terminal para o
 `gum`, então o script roda **sempre** com `--no-interactive`, e as perguntas que ele
 faria no terminal são feitas por você, com AskUserQuestion.
 
@@ -93,12 +94,12 @@ contexto.
 ## 4. Rodar o script
 
 Grave o contexto escolhido num arquivo temporário (no diretório de scratchpad da sessão,
-se houver). Rode o script chamando-o exatamente por `~/scripts/generate_pr.sh` (é o que
-o `allowed-tools` libera), com timeout de 600000 ms, porque a geração pode levar alguns
+se houver). Rode o script chamando-o exatamente por `generate_pr` (é o que o
+`allowed-tools` libera), com timeout de 600000 ms, porque a geração pode levar alguns
 minutos. Uma branch de destino digitada no "Other" vira `--base <branch>`.
 
 ```bash
-~/scripts/generate_pr.sh --no-interactive [--edit | --hotfix | --base <branch>] [--draft] [--diff <branch>] [--model <nome>] [--context-file <arquivo>]
+generate_pr --no-interactive [--edit | --hotfix | --base <branch>] [--draft] [--diff <branch>] [--model <nome>] [--context-file <arquivo>]
 ```
 
 O script faz o push da branch, cria o PR com o template (ou reaproveita o aberto para o
@@ -114,6 +115,9 @@ mostra o modelo usado.
   `--context-file`. Repita até funcionar ou o usuário desistir.
 - **`PR #N pronto!`** sem o erro acima — sucesso. Pegue os dados com
   `gh pr view --json url,title,baseRefName,isDraft`.
+- **`generate_pr: command not found`** — o comando não está instalado (ou
+  `~/.local/bin` não está no PATH). Peça para rodar o `install.sh` do repositório
+  script-pull-request e abrir uma nova sessão; não procure o script em outro lugar.
 - **Outros erros** (`Nenhum diff relevante`, branch de destino inexistente, provedor
   indisponível, falha no push ou no `gh`) — relate a mensagem do script e o que fazer;
   não tente contornar editando o PR à mão.

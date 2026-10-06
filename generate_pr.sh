@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
@@ -125,10 +125,26 @@ load_env_file() {
   done < "$file"
 }
 
-# Procura o .env ao lado do script (acompanha a ferramenta), com override opcional
-# via GENERATE_PR_ENV_FILE.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-load_env_file "${GENERATE_PR_ENV_FILE:-$SCRIPT_DIR/.env}"
+# Pasta real do script, seguindo links simbólicos (o install.sh cria o comando
+# generate_pr como link). readlink sem -f para funcionar também no macOS.
+_script_path="${BASH_SOURCE[0]}"
+while [ -L "$_script_path" ]; do
+  _link_dir="$(cd -P "$(dirname "$_script_path")" && pwd)"
+  _script_path="$(readlink "$_script_path")"
+  [[ "$_script_path" != /* ]] && _script_path="$_link_dir/$_script_path"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$_script_path")" && pwd)"
+
+# Configuração: GENERATE_PR_ENV_FILE, se definido; senão o .env ao lado do script e o
+# ~/.config/generate_pr/.env (criado pelo install.sh). Um valor já carregado não é
+# sobrescrito, então o primeiro arquivo vence.
+CONFIG_ENV_FILE="$HOME/.config/generate_pr/.env"
+if [ -n "${GENERATE_PR_ENV_FILE:-}" ]; then
+  load_env_file "$GENERATE_PR_ENV_FILE"
+else
+  load_env_file "$SCRIPT_DIR/.env"
+  load_env_file "$CONFIG_ENV_FILE"
+fi
 
 # Modelo padrão — definido só DEPOIS de carregar o .env, senão o default do código
 # ocupa a variável e o GEMINI_MODEL do .env é ignorado.
@@ -177,6 +193,11 @@ ai_model() {
   fi
 }
 
+# Primeira letra maiúscula. Substitui o ${var^}, que não existe no bash 3.2 do macOS.
+ucfirst() {
+  printf '%s%s' "$(printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]')" "${1:1}"
+}
+
 # Rótulo legível para logs (ex.: "Claude · opus via claude CLI").
 ai_model_label() {
   local via
@@ -185,7 +206,7 @@ ai_model_label() {
   else
     [ -n "$GEMINI_API_KEY_RESOLVED" ] && via="API REST" || via="gemini CLI"
   fi
-  printf '%s · %s via %s' "${AI_PROVIDER^}" "$(ai_model)" "$via"
+  printf '%s · %s via %s' "$(ucfirst "$AI_PROVIDER")" "$(ai_model)" "$via"
 }
 
 # O provedor tem como ser usado (API key ou CLI instalado)?
@@ -460,7 +481,7 @@ choose_model() {
   elif [ ${#providers[@]} -eq 1 ]; then
     provider="${providers[0]}"
   elif ! provider=$(gum choose "${providers[@]}" --header "Provedor de IA" \
-    --selected "${AI_PROVIDER^}"); then
+    --selected "$(ucfirst "$AI_PROVIDER")"); then
     _abort_cancel
   fi
 
@@ -846,7 +867,7 @@ ui_spin "Garantindo que a branch está no remoto..." \
 
 ui_log info "🔎 Verificando se já existe PR..."
 
-PR_TITLE="${CURRENT_BRANCH^}"
+PR_TITLE="$(ucfirst "$CURRENT_BRANCH")"
 PR_NUMBER=$(gh pr list --head "$CURRENT_BRANCH" --base "$TARGET_BRANCH" --state open --json number --jq '.[0].number')
 
 if [ -n "$PR_NUMBER" ]; then
@@ -959,11 +980,15 @@ $EXTRA_CONTEXT
 fi
 
 mkdir -p "$CACHE_DIR"
+# sha256sum (Linux) ou shasum (macOS).
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi
+}
 # Arquivo de cache para o provedor/modelo atual (recalculado se o modelo for trocado).
 cache_file() {
   printf '%s/%s' "$CACHE_DIR" \
     "$(printf '%s\n%s\n%s\n%s' "$CURRENT_BRANCH" "$AI_PROVIDER:$(ai_model)" "$EXTRA_CONTEXT" "$GIT_DIFF" \
-      | sha256sum | cut -d' ' -f1)"
+      | sha256 | cut -d' ' -f1)"
 }
 CACHE_FILE=$(cache_file)
 

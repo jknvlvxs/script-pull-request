@@ -12,6 +12,13 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ### Adicionado
 
+- Instalador `install.sh` para compartilhar o script com outras pessoas: confere e
+  instala as dependências (`brew` ou `apt`), verifica os logins do `gh` e do Claude
+  Code, cria `~/.config/generate_pr/.env`, o comando `generate_pr` em `~/.local/bin` e
+  a skill `/pullrequest` (links para o clone, atualizados com `git pull`). Pode ser
+  rodado de novo; `--uninstall` remove o comando e a skill.
+- Configuração em `~/.config/generate_pr/.env`, lida depois do `.env` ao lado do script.
+- Passo a passo de instalação no README (rápida e manual).
 - Skill `/pullrequest` para o Claude Code (`skills/pullrequest/SKILL.md`, instalada com
   um link simbólico em `~/.claude/skills/`). Roda o script com `--no-interactive`,
   faz as perguntas do modo interativo com a UI do Claude Code, propõe o contexto
@@ -45,6 +52,12 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ### Alterado
 
+- A skill `/pullrequest` chama o comando `generate_pr` em vez do caminho fixo
+  `~/scripts/generate_pr.sh`, então funciona com o repositório clonado em qualquer
+  pasta.
+- O script segue links simbólicos para achar a própria pasta (e o `.env` ao lado
+  dele) e roda no bash 3.2 do macOS: sem `${var^}` e com `shasum` quando não há
+  `sha256sum`.
 - **Claude Opus** passa a ser o padrão: `AI_PROVIDER` vale `claude` e `CLAUDE_MODEL`
   vale `opus` quando não definidos (antes, `gemini` e `sonnet`). O Gemini continua
   disponível via `AI_PROVIDER=gemini`, `--provider gemini` ou `--model gemini-*`.

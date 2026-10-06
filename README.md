@@ -34,7 +34,9 @@ Principais recursos:
 
 - [Pré-requisitos](#pré-requisitos)
 - [Instalação](#instalação)
-- [Configuração da API key](#configuração-da-api-key)
+  - [Instalação rápida (recomendada)](#instalação-rápida-recomendada)
+  - [Instalação manual](#instalação-manual)
+- [Configuração](#configuração)
 - [Uso](#uso)
   - [Modo interativo](#modo-interativo)
   - [Modo não-interativo (flags)](#modo-não-interativo-flags)
@@ -56,84 +58,127 @@ Principais recursos:
 | `curl`     | sim         | chamadas às APIs do Gemini e da Anthropic |
 | `jq`       | sim         | parsing das respostas da API |
 | `gum` ([Charm gum](https://github.com/charmbracelet/gum)) | sim | UI interativa (navegação por setas, busca incremental) e feedback visual |
+| `claude` CLI ([Claude Code](https://claude.com/claude-code)) | recomendada | gera as descrições com o Claude Opus (o padrão) quando **não** há `ANTHROPIC_API_KEY` (precisa estar logado) |
 | `node` + `gemini` CLI | opcional | usado apenas como fallback quando **não** há `GEMINI_API_KEY` |
-| `claude` CLI ([Claude Code](https://claude.com/claude-code)) | opcional | gera com Claude quando **não** há `ANTHROPIC_API_KEY` (precisa estar logado) |
 
-> O script verifica as dependências obrigatórias no início e **encerra com erro** se
-> alguma estiver ausente.
+> O `install.sh` confere tudo isso e instala o que faltar. O script também verifica as
+> dependências obrigatórias no início e **encerra com erro** se alguma estiver ausente.
 
 ---
 
 ## Instalação
 
-### 1. Clonar / posicionar o script
+### Instalação rápida (recomendada)
 
-O script já vive em `~/scripts/generate_pr.sh`. Deixe-o executável:
+Funciona no Linux (Debian/Ubuntu, inclusive WSL) e no macOS (com
+[Homebrew](https://brew.sh)).
 
-```bash
-chmod +x ~/scripts/generate_pr.sh
-```
+1. **Clone o repositório.** Ele é privado: peça acesso antes. A pasta pode ser
+   qualquer uma; os comandos abaixo usam `~/script-pull-request`.
 
-(Opcional) crie um alias no seu `~/.zshrc` / `~/.bashrc`:
+   ```bash
+   git clone git@github.com:jknvlvxs/script-pull-request.git ~/script-pull-request
+   # sem chave SSH no GitHub, com o gh já logado:
+   # gh repo clone jknvlvxs/script-pull-request ~/script-pull-request
+   ```
 
-```bash
-alias gpr="~/scripts/generate_pr.sh"
-```
+2. **Rode o instalador.** Ele mostra o que falta e pergunta antes de instalar
+   (`--yes` instala sem perguntar; no apt, pede a senha do `sudo`).
 
-### 2. Instalar o `gum`
+   ```bash
+   ~/script-pull-request/install.sh
+   ```
 
-**Debian/Ubuntu (apt):**
+3. **Faça os logins** que o instalador indicar:
+   - GitHub: `gh auth login` (o instalador oferece rodar na hora);
+   - Claude Code: instale com `curl -fsSL https://claude.ai/install.sh | bash` e
+     rode `claude` uma vez para logar. Ele é o provedor padrão das descrições; sem
+     ele, configure o Gemini (veja [Configuração](#configuração)).
 
-```bash
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" \
-  | sudo tee /etc/apt/sources.list.d/charm.list
-sudo apt update && sudo apt install gum
-```
+4. **Teste** numa branch de trabalho de qualquer repositório: rode `generate_pr` no
+   terminal ou `/pullrequest` numa sessão **nova** do Claude Code.
 
-**Outras opções:**
+O que o instalador faz (pode rodar de novo quando quiser; só refaz o que falta):
 
-```bash
-brew install gum          # macOS / Linuxbrew
-go install github.com/charmbracelet/gum@latest   # via Go
-```
+| Passo | O que acontece |
+|-------|----------------|
+| Dependências | Confere `git`, `curl`, `jq`, `gh` e `gum` e instala as que faltam pelo `brew` ou pelo `apt` (no apt, adiciona os repositórios oficiais do GitHub CLI e da Charm). |
+| Contas | Verifica se o `gh` está logado (oferece `gh auth login`) e se o Claude Code está instalado. |
+| Configuração | Cria `~/.config/generate_pr/.env` a partir do `.env.example`, sem sobrescrever um que já exista. |
+| Comando | Cria o link `~/.local/bin/generate_pr` → `generate_pr.sh` do clone (avisa se `~/.local/bin` não estiver no `PATH`). |
+| Skill | Cria o link `~/.claude/skills/pullrequest` → `skills/pullrequest` do clone. |
 
-### 3. Instalar `gh` e `jq` (se faltarem)
+**Atualizar:** `git -C ~/script-pull-request pull`. Comando e skill são links para o
+clone, então os dois se atualizam juntos.
 
-```bash
-sudo apt install gh jq      # Debian/Ubuntu
-gh auth login               # autenticar no GitHub
-```
+**Desinstalar:** `~/script-pull-request/install.sh --uninstall` remove o comando e a
+skill e mantém a configuração em `~/.config/generate_pr/`.
+
+### Instalação manual
+
+Para outras distribuições, ou se preferir fazer cada passo:
+
+1. **`gum`** — Debian/Ubuntu (apt):
+
+   ```bash
+   sudo mkdir -p /etc/apt/keyrings
+   curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+   echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" \
+     | sudo tee /etc/apt/sources.list.d/charm.list
+   sudo apt update && sudo apt install gum
+   ```
+
+   Outras opções: `brew install gum` (macOS / Linuxbrew) ou
+   `go install github.com/charmbracelet/gum@latest`.
+
+2. **`gh` e `jq`** — `sudo apt install gh jq` ou `brew install gh jq`; depois
+   `gh auth login`.
+
+3. **Comando, skill e configuração**, a partir da pasta do clone:
+
+   ```bash
+   chmod +x generate_pr.sh
+   mkdir -p ~/.local/bin ~/.claude/skills ~/.config/generate_pr
+   ln -s "$PWD/generate_pr.sh" ~/.local/bin/generate_pr
+   ln -s "$PWD/skills/pullrequest" ~/.claude/skills/pullrequest
+   cp .env.example ~/.config/generate_pr/.env && chmod 600 ~/.config/generate_pr/.env
+   ```
 
 ---
 
-## Configuração da API key
+## Configuração
+
+Com o Claude Code instalado e logado, nada precisa ser configurado: o padrão é o
+**Claude Opus** pelo `claude` CLI. Para trocar provedor, modelo ou usar API keys,
+edite o `~/.config/generate_pr/.env` (criado pelo instalador; o `.env.example` explica
+cada variável).
+
+Ordem de precedência das variáveis:
+
+1. Flags (`--model`, `--provider`) e a seleção do modo interativo
+2. Variáveis de ambiente
+3. `GENERATE_PR_ENV_FILE`, se definida (aí só esse arquivo é lido); senão o `.env` ao
+   lado do script e depois o `~/.config/generate_pr/.env`
+4. Defaults do código
+
+Os arquivos `.env` são ignorados pelo git (ver `.gitignore`).
 
 ### Gemini
 
 O script usa a Generative Language API (Google AI Studio). A key é resolvida nesta
 ordem de precedência:
 
-1. Variável de ambiente `GEMINI_API_KEY`
-2. Arquivo `.env` ao lado do script (ou `GENERATE_PR_ENV_FILE`)
-3. Arquivo `~/.config/generate_pr/api_key`
+1. `GEMINI_API_KEY` (variável de ambiente ou `.env`, na ordem acima)
+2. Arquivo `~/.config/generate_pr/api_key`
 
 > Se **nenhuma** key for encontrada, o script tenta usar o `gemini` CLI como fallback.
 
-### Opção recomendada: arquivo `.env`
-
-```bash
-cd ~/scripts
-cp .env.example .env
-# edite o .env e preencha GEMINI_API_KEY
-```
-
-O `.env` já é ignorado pelo git (ver `.gitignore`). Conteúdo:
+Para usar o Gemini como padrão, no `~/.config/generate_pr/.env`:
 
 ```dotenv
+AI_PROVIDER=gemini
 GEMINI_API_KEY=sua_key_aqui
-GEMINI_MODEL=gemini-3.7-flash
+GEMINI_MODEL=gemini-3.5-flash
 ```
 
 ### Alternativas
@@ -175,7 +220,7 @@ ANTHROPIC_API_KEY=           # opcional; sem ela o claude CLI é usado
 Execute a partir do diretório do repositório, **na branch** que deseja abrir o PR:
 
 ```bash
-~/scripts/generate_pr.sh
+generate_pr
 ```
 
 ### Modo interativo
@@ -206,25 +251,25 @@ Passar qualquer flag desativa o modo interativo (ideal para automação/CI):
 
 ```bash
 # PR normal, modelo flash, com contexto inline
-~/scripts/generate_pr.sh --no-interactive --model gemini-2.5-flash --context "Foco no fix de timeout"
+generate_pr --no-interactive --model gemini-2.5-flash --context "Foco no fix de timeout"
 
 # Gerar a descrição com o Claude Opus
-~/scripts/generate_pr.sh --no-interactive --model opus
+generate_pr --no-interactive --model opus
 
 # Regenerar a descrição do PR já aberto desta branch
-~/scripts/generate_pr.sh --edit --model sonnet
+generate_pr --edit --model sonnet
 
 # Hotfix em draft
-~/scripts/generate_pr.sh --hotfix --draft
+generate_pr --hotfix --draft
 
 # Comparar contra uma branch específica
-~/scripts/generate_pr.sh --diff develop
+generate_pr --diff develop
 
 # Contexto vindo de arquivo
-~/scripts/generate_pr.sh --context-file ./notas-do-pr.md
+generate_pr --context-file ./notas-do-pr.md
 
 # Apenas listar modelos disponíveis
-~/scripts/generate_pr.sh --list-models
+generate_pr --list-models
 ```
 
 A checagem de PR existente filtra pela branch de **destino**: se já houver um PR
@@ -235,12 +280,9 @@ um novo PR é criado.
 ### Dentro do Claude Code (`/pullrequest`)
 
 A skill em [`skills/pullrequest/SKILL.md`](skills/pullrequest/SKILL.md) permite usar o
-script numa sessão do Claude Code. Instale uma vez, com um link simbólico (a skill
-continua versionada aqui):
-
-```bash
-ln -s ~/scripts/skills/pullrequest ~/.claude/skills/pullrequest
-```
+script numa sessão do Claude Code. O `install.sh` já a instala, como um link para o
+clone (a skill continua versionada aqui e se atualiza com o `git pull`). Ela chama o
+comando `generate_pr`, então o `~/.local/bin` precisa estar no `PATH`.
 
 Depois, na branch do PR, dentro do Claude Code:
 
@@ -298,7 +340,7 @@ Como funciona:
 | `AI_PROVIDER` | `claude` | Provedor padrão: `claude` ou `gemini`. |
 | `CLAUDE_MODEL` | `opus` | Modelo Claude padrão: `sonnet`, `opus`, `haiku` ou um ID completo (ex.: `claude-opus-5-5`). |
 | `ANTHROPIC_API_KEY` | — | API key da Anthropic. Sem ela, o Claude roda pelo `claude` CLI. |
-| `GENERATE_PR_ENV_FILE` | `<dir do script>/.env` | Caminho alternativo para o arquivo `.env`. |
+| `GENERATE_PR_ENV_FILE` | — | Caminho de um `.env` alternativo. Quando definida, substitui o `.env` ao lado do script e o `~/.config/generate_pr/.env`. |
 
 ---
 
@@ -349,8 +391,13 @@ rm -rf ~/.cache/generate_pr
 **`Dependência ausente: gum` (ou gh/jq/curl/git)**
 Instale a ferramenta indicada (ver [Instalação](#instalação)). O script só roda com todas as dependências obrigatórias presentes.
 
+**`generate_pr: command not found`** (no terminal ou no `/pullrequest`)
+O comando não foi instalado ou o `~/.local/bin` não está no `PATH`. Rode o
+`install.sh` de novo e siga o aviso sobre o `PATH`; depois abra um novo terminal (ou
+uma nova sessão do Claude Code).
+
 **`Nenhuma API key encontrada`**
-Configure a key (ver [Configuração da API key](#configuração-da-api-key)).
+Configure a key (ver [Configuração](#configuração)).
 
 **`Template ... não encontrado — usando template padrão`**
 Apenas um aviso: o repositório não tem `.github/pull_request_template.md`, então o
