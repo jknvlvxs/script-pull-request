@@ -49,6 +49,7 @@ Principais recursos:
 - [Como funciona o fluxo](#como-funciona-o-fluxo)
 - [Cache](#cache)
 - [Solução de problemas](#solução-de-problemas)
+- [Licença](#licença)
 
 ---
 
@@ -278,3 +279,9 @@ limite de uso). Para o CLI, confira se `claude -p "oi"` funciona no terminal.
 
 **PR não foi criado / falha de autenticação do `gh`**
 Rode `gh auth login` e confirme que sua conta tem acesso ao repositório.
+
+---
+
+## Licença
+
+Distribuído sob a licença MIT. Veja o [LICENSE](LICENSE).

@@ -25,7 +25,6 @@ Claude Code. Para usar depois de instalado, veja o [README](README.md).
 - **Sistema:** Linux (Debian/Ubuntu), macOS com [Homebrew](https://brew.sh) ou
   Windows pelo [WSL](https://learn.microsoft.com/windows/wsl/install) com Ubuntu. Em
   outras distribuições, use a [instalação manual](#instalação-manual).
-- **Acesso ao repositório:** ele é privado; peça para ser adicionado antes de clonar.
 - **GitHub:** uma conta com acesso aos repositórios em que você vai abrir PRs.
 - **Claude Code** (recomendado): é o provedor padrão das descrições e não precisa de
   API key. Sem ele, dá para usar o Gemini com uma key (veja [Gemini](#gemini)).
@@ -50,9 +49,7 @@ Dependências (o instalador confere todas e instala as que faltarem):
    `~/script-pull-request`.
 
    ```bash
-   git clone git@github.com:jknvlvxs/script-pull-request.git ~/script-pull-request
-   # sem chave SSH no GitHub, com o gh já logado:
-   # gh repo clone jknvlvxs/script-pull-request ~/script-pull-request
+   git clone https://github.com/jknvlvxs/script-pull-request.git ~/script-pull-request
    ```
 
 2. **Rode o instalador.** Ele mostra o que falta e pergunta antes de instalar
@@ -277,12 +274,6 @@ As skills são carregadas quando a sessão começa: abra uma sessão nova. Confi
 link existe com `ls -l ~/.claude/skills/pullrequest`. Se o instalador avisou que
 `~/.claude/skills/pullrequest já existe e não é um link`, renomeie ou apague essa
 pasta e rode o `install.sh` de novo.
-
-**`Permission denied (publickey)` ao clonar**
-Sua chave SSH não está cadastrada no GitHub. Clone com
-`gh repo clone jknvlvxs/script-pull-request ~/script-pull-request` (depois de
-`gh auth login`) ou [cadastre uma chave SSH](https://docs.github.com/authentication/connecting-to-github-with-ssh).
-Se aparecer `Repository not found`, você ainda não tem acesso ao repositório.
 
 **No macOS: `Instale manualmente` / Homebrew não encontrado**
 O instalador usa o Homebrew no macOS. Instale-o em [brew.sh](https://brew.sh) e rode

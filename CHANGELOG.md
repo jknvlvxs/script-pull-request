@@ -12,21 +12,14 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 
 ### Adicionado
 
-- `INSTALLATION.md` com o guia de instalação: requisitos, instalação rápida e manual,
-  conferência com `generate_pr --help`, o que o instalador faz (inclusive
-  `GENERATE_PR_BIN_DIR`), configuração dos provedores, todas as variáveis, como
-  atualizar e desinstalar e problemas comuns na instalação.
+- Licença MIT (`LICENSE`), citada no README e como `SPDX-License-Identifier` no
+  topo do `generate_pr.sh` e do `install.sh`.
 
 ### Alterado
 
-- O README fica só com o uso (modo interativo, flags, skill, fluxo, cache e problemas
-  no uso) e aponta para o `INSTALLATION.md`. As mensagens de dependência ausente do
-  script e do instalador também apontam para ele.
-
-### Corrigido
-
-- A solução de problemas citava a mensagem `Nenhuma API key encontrada`, que o script
-  não mostra mais; agora cita `Gemini indisponível`.
+- Com o repositório público, a instalação clona por HTTPS, sem chave SSH nem pedido
+  de acesso. Saem do `INSTALLATION.md` o aviso de repositório privado e o problema
+  `Permission denied (publickey)`.
 
 ## 2026-10-06
 
@@ -87,6 +80,10 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   execução for interrompida), a próxima execução interativa mostra o contexto salvo e
   oferece usar, editar, escrever um novo ou descartar. O arquivo é apagado quando a
   descrição é aplicada ao PR.
+- `INSTALLATION.md` com o guia de instalação: requisitos, instalação rápida e manual,
+  conferência com `generate_pr --help`, o que o instalador faz (inclusive
+  `GENERATE_PR_BIN_DIR`), configuração dos provedores, todas as variáveis, como
+  atualizar e desinstalar e problemas comuns na instalação.
 
 ### Alterado
 
@@ -120,6 +117,9 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
   de fato gerou a descrição.
 - A chave do cache passa a incluir o provedor (`provedor:modelo`), então descrições
   em cache de versões anteriores não são reaproveitadas.
+- O README fica só com o uso (modo interativo, flags, skill, fluxo, cache e problemas
+  no uso) e aponta para o `INSTALLATION.md`. As mensagens de dependência ausente do
+  script e do instalador também apontam para ele.
 
 ### Corrigido
 
@@ -140,6 +140,8 @@ Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
 - O `GEMINI_MODEL` definido no `.env` era ignorado: o default do código era atribuído
   antes de carregar o `.env`, e o loader não sobrescreve variáveis já definidas. O
   default agora é aplicado depois do `.env`.
+- A solução de problemas citava a mensagem `Nenhuma API key encontrada`, que o script
+  não mostra mais; agora cita `Gemini indisponível`.
 
 ## 2026-09-24
 

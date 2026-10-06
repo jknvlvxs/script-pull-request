@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
 # Instalador do generate_pr: confere/instala as dependências, cria o comando
 # `generate_pr`, a configuração em ~/.config/generate_pr/.env e a skill /pullrequest
 # do Claude Code. Pode ser rodado de novo sem problemas (só refaz o que falta).
