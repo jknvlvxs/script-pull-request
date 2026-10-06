@@ -1,0 +1,168 @@
+# Changelog
+
+Todas as mudanças relevantes do `generate_pr.sh` são documentadas neste arquivo.
+
+O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Como o
+script não tem versões numeradas, as entradas são agrupadas por data; mudanças ainda
+não mescladas na `main` ficam em **[Não lançado]**.
+
+Categorias usadas: **Adicionado**, **Alterado**, **Corrigido**, **Removido**.
+
+## [Não lançado]
+
+### Adicionado
+
+- Instalador `install.sh` para compartilhar o script com outras pessoas: confere e
+  instala as dependências (`brew` ou `apt`), verifica os logins do `gh` e do Claude
+  Code, cria `~/.config/generate_pr/.env`, o comando `generate_pr` em `~/.local/bin` e
+  a skill `/pullrequest` (links para o clone, atualizados com `git pull`). Pode ser
+  rodado de novo; `--uninstall` remove o comando e a skill.
+- Configuração em `~/.config/generate_pr/.env`, lida depois do `.env` ao lado do script.
+- Passo a passo de instalação no README (rápida e manual).
+- Revisão da descrição antes de aplicar (no terminal): aplicar, editar no `$VISUAL`/
+  `$EDITOR`, gerar de novo (com a opção de ajustar o contexto) ou não aplicar.
+- Ao atualizar um PR (`--edit` ou PR reaproveitado), a descrição atual vai para o
+  prompt, para o modelo manter o que o autor escreveu à mão, e os checkboxes já
+  marcados (como o checklist) continuam marcados.
+- O prompt inclui as mensagens dos commits da branch (sem trailers como
+  `Co-Authored-By`) e o resumo dos arquivos alterados (`git diff --stat`).
+- Flag `--verify` para rodar os hooks de pre-push (continuam pulados por padrão).
+- Proteções no terminal: o script recusa rodar em `main`, `master`, `release` ou com
+  HEAD destacado e avisa sobre alterações não commitadas.
+- A URL do PR aparece no fim, com a opção de abrir no navegador.
+- Skill `/pullrequest` para o Claude Code (`skills/pullrequest/SKILL.md`, instalada com
+  um link simbólico em `~/.claude/skills/`). Roda o script com `--no-interactive`,
+  faz as perguntas do modo interativo com a UI do Claude Code, propõe o contexto
+  extra a partir da conversa e, se a geração falhar, oferece trocar de modelo e roda
+  de novo com `--edit`.
+- Geração da descrição com **Claude**, escolhendo entre **Sonnet**, **Opus** e
+  **Haiku**. Usa a Messages API quando há `ANTHROPIC_API_KEY` e, sem ela, o `claude`
+  CLI (Claude Code) em modo não interativo, sem ferramentas, com a conta já logada.
+- Passo "Provedor e modelo" no modo interativo: escolhe Gemini ou Claude (só aparecem
+  os provedores configurados) e depois o modelo.
+- Flag `--provider` e variáveis `AI_PROVIDER`, `CLAUDE_MODEL` e `ANTHROPIC_API_KEY`.
+  `--model` deduz o provedor pelo nome (`gemini-*` → Gemini; `sonnet`/`opus`/`haiku`/
+  `claude-*` → Claude).
+- `--list-models` também mostra os apelidos do Claude.
+- Flag `--edit`: atualiza só a descrição do PR aberto da branch, usando o destino dele
+  (ignora `--hotfix`/`--base`). No modo interativo, pula a pergunta editar/criar.
+- Checagem antecipada: se o provedor escolhido não tem key nem CLI, o script para antes
+  de criar ou alterar o PR.
+- No Opus via API, recusas dos classificadores de segurança passam pelo fallback
+  server-side da Anthropic (`fallbacks: "default"`), que refaz a chamada em outro
+  modelo.
+- Troca de modelo após **2 falhas seguidas** na geração: o script pergunta se quer
+  trocar de modelo (inclusive de provedor), tentar de novo com o mesmo ou desistir
+  (o PR fica com o template). O prompt é o mesmo, então o contexto extra já digitado
+  não se perde. Sem terminal ou com `--no-interactive`, desiste direto.
+- O contexto extra é salvo por repositório + branch em
+  `~/.cache/generate_pr/context/` assim que é definido. Se a geração falhar (ou a
+  execução for interrompida), a próxima execução interativa mostra o contexto salvo e
+  oferece usar, editar, escrever um novo ou descartar. O arquivo é apagado quando a
+  descrição é aplicada ao PR.
+
+### Alterado
+
+- Prompt reorganizado: dados primeiro, cada um numa tag (`<commits>`, `<diff>`,
+  `<template>`…), e as regras no fim. O papel e critérios de uma boa descrição
+  (porquê e impacto primeiro, agrupar por assunto, apontar riscos, pt-BR) vão como
+  system prompt nos três caminhos (API do Gemini, API da Anthropic e `claude` CLI).
+  Os checkboxes de classificação, como "Tipo de mudança", agora são marcados.
+- A chave do cache passa a ser o prompt completo (e as instruções), então mudanças
+  no template ou nas regras geram uma descrição nova. Caches antigos não são
+  reaproveitados.
+- A skill `/pullrequest` chama o comando `generate_pr` em vez do caminho fixo
+  `~/scripts/generate_pr.sh`, então funciona com o repositório clonado em qualquer
+  pasta.
+- O script segue links simbólicos para achar a própria pasta (e o `.env` ao lado
+  dele) e roda no bash 3.2 do macOS: sem `${var^}` e com `shasum` quando não há
+  `sha256sum`.
+- **Claude Opus** passa a ser o padrão: `AI_PROVIDER` vale `claude` e `CLAUDE_MODEL`
+  vale `opus` quando não definidos (antes, `gemini` e `sonnet`). O Gemini continua
+  disponível via `AI_PROVIDER=gemini`, `--provider gemini` ou `--model gemini-*`.
+- Na Messages API, o apelido `opus` aponta para o `claude-opus-5-5` (antes,
+  `claude-opus-5`), com o mesmo fallback server-side em caso de recusa.
+- A lista de modelos Gemini (seleção interativa e `--list-models`) mostra apenas os
+  modelos *flash* de texto, do mais novo para o mais antigo. Variantes pro, lite,
+  image, tts e afins ficam de fora (ainda é possível usá-las via `--model`).
+- `.env.example` sugere um modelo flash (`gemini-3.5-flash`) em vez do
+  `gemini-2.5-pro`.
+- As tentativas por modelo caem de 3 para 2 antes de desistir ou oferecer a troca.
+- Quando o modelo é trocado durante a geração, o cache é salvo na chave do modelo que
+  de fato gerou a descrição.
+- A chave do cache passa a incluir o provedor (`provedor:modelo`), então descrições
+  em cache de versões anteriores não são reaproveitadas.
+
+### Corrigido
+
+- Detecção do ID do ClickUp: só funcionava logo depois de `feat/`, `fix/` etc. e, em
+  nomes como `dhr-feat/novaatualizacao-868kut8jj`, pegava os 9 primeiros caracteres
+  depois da barra (`novaatual`). Agora o ID é um trecho de 9 caracteres alfanuméricos,
+  com pelo menos um dígito, em qualquer posição do nome (com preferência para os que
+  começam com `86`).
+- No modo não interativo, rodar de novo numa branch que já tem PR aberto para o mesmo
+  destino terminava com erro ("Já existe PR"), embora o README diga que o PR é
+  reutilizado. Agora o PR existente é reutilizado e só a descrição é atualizada; o
+  erro continua apenas quando, no modo interativo, se escolhe "Criar um novo PR".
+- Fora de um terminal (CI, Claude Code), o spinner do `gum` enchia a saída de códigos
+  ANSI. Sem TTY o comando agora roda direto, com uma linha de log, e a saída só aparece
+  se ele falhar.
+- A listagem de modelos lia só a primeira página da API (50 modelos) e podia omitir
+  modelos novos; agora pede `pageSize=1000`.
+- O `GEMINI_MODEL` definido no `.env` era ignorado: o default do código era atribuído
+  antes de carregar o `.env`, e o loader não sobrescreve variáveis já definidas. O
+  default agora é aplicado depois do `.env`.
+
+## 2026-09-24
+
+### Alterado
+
+- Modelo Gemini padrão passa a ser `gemini-3.5-flash`.
+- O payload da API REST do Gemini é montado e enviado a partir de arquivos temporários
+  (`jq --rawfile` + `curl --data-binary @arquivo`), evitando estourar o `ARG_MAX` do
+  shell com diffs grandes.
+
+## 2026-06-18
+
+### Adicionado
+
+- Interface interativa com [`gum`](https://github.com/charmbracelet/gum): navegação por
+  setas, busca incremental de branches/modelos e editor multilinha para o contexto,
+  substituindo os menus numéricos do `select`.
+- Detecção de PR já aberto da branch atual, com a opção de editar o existente (gerar
+  nova descrição) ou criar um novo PR para outro destino.
+- Opção "Outra" no tipo de PR e flag `--base`/`--target` para escolher manualmente a
+  branch de destino (validada contra o remoto).
+- Template de PR padrão embutido, usado quando o repositório não tem
+  `.github/pull_request_template.md`.
+- Geração via API REST do Gemini (curl + jq), com fallback para o `gemini` CLI quando
+  não há API key.
+- Carregamento automático do `.env` ao lado do script (ou `GENERATE_PR_ENV_FILE`) e
+  leitura da key em `~/.config/generate_pr/api_key`.
+- Flags `--model`, `--context`, `--context-file`, `--list-models`, `-i/--interactive` e
+  `--no-interactive`.
+- Cache das descrições geradas em `~/.cache/generate_pr/` (branch + modelo + contexto +
+  diff).
+- O PR é criado primeiro com o template e a descrição da IA é aplicada depois via
+  `PATCH` — se a IA falhar, o PR continua válido.
+- `README.md` com instalação, uso, flags e solução de problemas.
+
+### Alterado
+
+- Modelo padrão trocado para `gemini-2.5-flash` (o free tier do `gemini-2.5-pro` foi
+  removido).
+
+### Corrigido
+
+- Erro `NumericalClassifierStrategy` do roteador interno do `gemini` CLI, contornado
+  com a chamada direta à API REST.
+- A checagem de PR existente passa a filtrar pela branch de destino (`--base`),
+  evitando reusar um PR aberto para outro destino.
+- O `--value` do `gum filter` pré-filtrava a lista de modelos.
+
+## 2026-04-20
+
+### Adicionado
+
+- Versão inicial do `generate_pr.sh`: gera a descrição do PR com o `gemini` CLI a
+  partir do `git diff` e cria o PR com o `gh`.
