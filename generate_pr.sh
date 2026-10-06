@@ -82,7 +82,7 @@ for _dep in gum gh jq curl git; do
   command -v "$_dep" >/dev/null 2>&1 || { echo "❌ Dependência ausente: $_dep"; _missing_dep=1; }
 done
 if [ -n "$_missing_dep" ]; then
-  echo "ℹ️  Instale as dependências acima e tente novamente (veja o README.md)."
+  echo "ℹ️  Rode o install.sh do repositório ou veja o INSTALLATION.md."
   exit 1
 fi
 
